@@ -25,7 +25,11 @@ pub struct RedisConfig {
 
 impl Config {
     pub fn from_env() -> Result<Self, envy::Error> {
-        envy::from_env()
+        Ok(Self {
+            server: envy::prefixed("SERVER_").from_env()?,
+            database: envy::prefixed("DATABASE_").from_env()?,
+            redis: envy::prefixed("REDIS_").from_env()?,
+        })
     }
 }
 
