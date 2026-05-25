@@ -27,7 +27,14 @@ impl ApplicationService {
             .ok_or_else(|| AppError::NotFound(format!("Application not found: {public_id}")))
     }
 
-    pub async fn delete_by_id(&self, public_id: String) -> Result<(), AppError> {
-        self.repo.delete_by_id(public_id).await
+    pub async fn delete_by_id(&self, public_id: String, ctx: RequestContext) -> Result<(), AppError> {
+        self.repo.delete_by_id(public_id, ctx).await
+    }
+
+    pub async fn restore_by_id(&self, public_id: String, ctx: RequestContext) -> Result<GetApplicationResponse, AppError> {
+        self.repo
+            .restore_by_id(public_id.clone(), ctx)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("Application not found: {public_id}")))
     }
 }

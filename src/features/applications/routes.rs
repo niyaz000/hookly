@@ -9,5 +9,9 @@ pub fn routes(state: AppState) -> Router {
             "/applications/:public_id",
             get(super::handlers::get_by_id).delete(super::handlers::delete_by_id),
         )
+        .route(
+            "/applications/:public_id/restore",
+            post(super::handlers::restore_by_id),
+        )
         .with_state(state)
 }

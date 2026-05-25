@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::common::NanoId;
 use crate::common::types::RequestContext;
 use crate::error::AppError;
-use crate::features::applications::models::{ Application, CreateApplicationRequest, GetApplicationResponse };
+use crate::features::applications::models::{Application, CreateApplicationRequest, GetApplicationResponse};
 
 pub struct ApplicationRepository {
     pool: PgPool,
@@ -29,22 +29,15 @@ impl ApplicationRepository {
         let application = sqlx::query_as::<_, Application>(
             r#"
             INSERT INTO applications (
-                id,
-                organization_id,
-                tenant_id,
-                public_id,
-                name,
-                description,
-                tags,
-                created_at,
-                updated_at,
-                request_id,
-                version,
-                created_by,
-                updated_by,
-                deleted_at
+                id, organization_id, tenant_id, public_id,
+                name, description, tags,
+                created_at, updated_at,
+                request_id, version, created_by, updated_by, deleted_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-            RETURNING id, public_id, organization_id, tenant_id, name, description, tags, created_at, updated_at
+            RETURNING
+                id, public_id, organization_id, tenant_id,
+                name, description, tags, state,
+                created_by, updated_by, created_at, updated_at
             "#,
         )
         .bind(id)
@@ -67,28 +60,66 @@ impl ApplicationRepository {
         Ok(application)
     }
 
-
-    pub async fn get_by_id(&self, id: String) -> Result<Option<GetApplicationResponse>, AppError> {
+    pub async fn get_by_id(&self, public_id: String) -> Result<Option<GetApplicationResponse>, AppError> {
         let application = sqlx::query_as::<_, Application>(
-            r#"SELECT * FROM applications WHERE public_id = $1"#,
+            r#"
+            SELECT id, public_id, organization_id, tenant_id,
+                   name, description, tags, state,
+                   created_by, updated_by, created_at, updated_at
+            FROM applications
+            WHERE public_id = $1
+            "#,
         )
-        .bind(id)
+        .bind(public_id)
         .fetch_optional(&self.pool)
         .await?;
+
         Ok(application.map(GetApplicationResponse::from))
     }
 
-    pub async fn delete_by_id(&self, public_id: String) -> Result<(), AppError> {
+    pub async fn delete_by_id(&self, public_id: String, ctx: RequestContext) -> Result<(), AppError> {
         sqlx::query(
             r#"
             UPDATE applications
-            SET deleted_at = NOW()
+            SET deleted_at = NOW(),
+                state      = 'INACTIVE',
+                updated_by = $2,
+                request_id = $3,
+                updated_at = NOW()
             WHERE public_id = $1 AND deleted_at IS NULL
             "#,
         )
         .bind(public_id)
+        .bind(ctx.created_by)
+        .bind(ctx.request_id)
         .execute(&self.pool)
         .await?;
+
         Ok(())
+    }
+
+    pub async fn restore_by_id(&self, public_id: String, ctx: RequestContext) -> Result<Option<GetApplicationResponse>, AppError> {
+        let application = sqlx::query_as::<_, Application>(
+            r#"
+            UPDATE applications
+            SET deleted_at = NULL,
+                state      = 'ACTIVE',
+                updated_by = $2,
+                request_id = $3,
+                updated_at = NOW()
+            WHERE public_id = $1
+            RETURNING
+                id, public_id, organization_id, tenant_id,
+                name, description, tags, state,
+                created_by, updated_by, created_at, updated_at
+            "#,
+        )
+        .bind(public_id)
+        .bind(ctx.created_by)
+        .bind(ctx.request_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(application.map(GetApplicationResponse::from))
     }
 }
