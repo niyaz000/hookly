@@ -1,10 +1,10 @@
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::{Path, State}, http::StatusCode, Json};
 
 use crate::{
     common::{PublicUuid, types::{ApiResponse, RequestContext}},
     error::AppError,
     features::applications::{
-        models::{CreateApplicationRequest, CreateApplicationResponse},
+        models::{CreateApplicationRequest, CreateApplicationResponse, GetApplicationResponse},
         repository::ApplicationRepository,
         service::ApplicationService,
     },
@@ -30,4 +30,29 @@ pub async fn create_application(
             data: CreateApplicationResponse::from(application),
         }),
     ))
+}
+
+pub async fn get_by_id(
+    State(state): State<AppState>,
+    Path(public_id): Path<String>,
+) -> Result<(StatusCode, Json<ApiResponse<GetApplicationResponse>>), AppError> {
+    let service = ApplicationService::new(ApplicationRepository::new(state.db));
+    let application = service.get_by_id(public_id).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ApiResponse {
+            success: true,
+            data: application,
+        }),
+    ))
+}
+
+pub async fn delete_by_id(
+    State(state): State<AppState>,
+    Path(public_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let service = ApplicationService::new(ApplicationRepository::new(state.db));
+    service.delete_by_id(public_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

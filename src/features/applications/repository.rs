@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::common::NanoId;
 use crate::common::types::RequestContext;
 use crate::error::AppError;
-use crate::features::applications::models::{Application, CreateApplicationRequest};
+use crate::features::applications::models::{ Application, CreateApplicationRequest, GetApplicationResponse };
 
 pub struct ApplicationRepository {
     pool: PgPool,
@@ -65,5 +65,30 @@ impl ApplicationRepository {
         .await?;
 
         Ok(application)
+    }
+
+
+    pub async fn get_by_id(&self, id: String) -> Result<Option<GetApplicationResponse>, AppError> {
+        let application = sqlx::query_as::<_, Application>(
+            r#"SELECT * FROM applications WHERE public_id = $1"#,
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(application.map(GetApplicationResponse::from))
+    }
+
+    pub async fn delete_by_id(&self, public_id: String) -> Result<(), AppError> {
+        sqlx::query(
+            r#"
+            UPDATE applications
+            SET deleted_at = NOW()
+            WHERE public_id = $1 AND deleted_at IS NULL
+            "#,
+        )
+        .bind(public_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
