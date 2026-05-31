@@ -121,7 +121,98 @@ impl IntoResponse for AppError {
 
 impl From<sqlx::Error> for AppError {
     fn from(err: sqlx::Error) -> Self {
+        if let sqlx::Error::Database(ref db_err) = err {
+            match db_err.code().as_deref() {
+                Some("23505") => {
+                    let msg = conflict_message(db_err.constraint(), db_err.table());
+                    return AppError::Conflict(msg);
+                }
+                Some("23503") => {
+                    return AppError::BadRequest("Referenced resource does not exist".into());
+                }
+                _ => {}
+            }
+        }
         AppError::Database(err)
+    }
+}
+
+// Builds a human-readable conflict message from the constraint and table names.
+// Convention: `{table}_{field}_uq` or `idx_{table}_{field}`.
+fn conflict_message(constraint: Option<&str>, table: Option<&str>) -> String {
+    let field = constraint.and_then(|c| {
+        let c = c.strip_prefix("idx_").unwrap_or(c);
+        let c = c.strip_suffix("_uq").unwrap_or(c);
+        let c = if let Some(t) = table {
+            c.strip_prefix(t).and_then(|r| r.strip_prefix('_')).unwrap_or(c)
+        } else {
+            c
+        };
+        if c.is_empty() { None } else { Some(c.replace('_', " ")) }
+    });
+
+    match field {
+        Some(f) => format!("A resource with this {} already exists", f),
+        None => "A resource with this value already exists".into(),
+    }
+}
+
+impl From<validator::ValidationErrors> for AppError {
+    fn from(errs: validator::ValidationErrors) -> Self {
+        let field_errors = errs
+            .field_errors()
+            .into_iter()
+            .flat_map(|(field, errors)| {
+                errors.iter().map(move |e| {
+                    let code = remap_validator_code(e);
+                    let message = e
+                        .message
+                        .as_deref()
+                        .unwrap_or(e.code.as_ref())
+                        .to_owned();
+                    FieldError::new(field, code, message)
+                })
+            })
+            .collect();
+        AppError::Validation(field_errors)
+    }
+}
+
+fn remap_validator_code(e: &validator::ValidationError) -> &'static str {
+    match e.code.as_ref() {
+        "email" => "invalid_format",
+        "length" => {
+            let max = e.params.get("max").and_then(|v| v.as_u64());
+            let min = e.params.get("min").and_then(|v| v.as_u64());
+            let is_array = e.params.get("value").map(|v| v.is_array()).unwrap_or(false);
+            let actual: Option<u64> = e.params.get("value").and_then(|v| match v {
+                serde_json::Value::String(s) => Some(s.len() as u64),
+                serde_json::Value::Array(a) => Some(a.len() as u64),
+                _ => None,
+            });
+            if let (Some(mx), Some(len)) = (max, actual) {
+                if len > mx {
+                    return "max_length";
+                }
+            }
+            if min.is_some() {
+                if is_array {
+                    return "min_items";
+                }
+                return "required";
+            }
+            "length"
+        }
+        other => {
+            // Custom validators set their own codes; leak to 'static via a fixed set.
+            match other {
+                "required" => "required",
+                "invalid_format" => "invalid_format",
+                "invalid_value" => "invalid_value",
+                "min_items" => "min_items",
+                _ => "validation_error",
+            }
+        }
     }
 }
 

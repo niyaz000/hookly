@@ -94,7 +94,7 @@ pub struct EventType {
 
 // ── Request types ─────────────────────────────────────────────────────────────
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct CreateEventTypeRequest {
     pub tenant_id: Uuid,
     pub organization_id: Uuid,
@@ -104,7 +104,7 @@ pub struct CreateEventTypeRequest {
     pub event_schema: PropertyDef,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct CreateVersionRequest {
     pub schema_version: String,
     pub description: Option<String>,
@@ -138,7 +138,7 @@ pub struct UpdateEventTypeRequest {
 
 // ── Response types ────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct EventTypeResponse {
     pub id: String,
     pub organization_id: Uuid,

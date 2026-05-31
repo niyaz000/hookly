@@ -2,8 +2,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
 use uuid::Uuid;
+use validator::Validate;
 
-use crate::error::{AppError, FieldError};
+use crate::common::validators::validate_not_blank;
+use crate::error::AppError;
 
 // --- DB row structs ---
 
@@ -54,114 +56,47 @@ pub struct ScheduleExecutionRow {
 
 // --- Request types ---
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct CreateScheduleRequest {
+    #[validate(custom(function = "validate_not_blank", message = "name is required"))]
+    #[validate(length(max = 255, message = "name must be 255 characters or fewer"))]
     pub name: String,
     pub description: Option<String>,
     pub tenant_id: Uuid,
     pub organization_id: Uuid,
+    #[validate(custom(function = "validate_not_blank", message = "event_type_id is required"))]
     pub event_type_id: String,
+    #[validate(length(min = 1, message = "endpoint_ids must contain at least one entry"))]
     pub endpoint_ids: Vec<String>,
     pub payload: serde_json::Value,
+    #[validate(custom(function = "validate_not_blank", message = "cron_expression is required"))]
     pub cron_expression: String,
     pub timezone: Option<String>,
 }
 
 impl CreateScheduleRequest {
     pub fn validate(&self) -> Result<(), AppError> {
-        let mut errors = Vec::new();
-
-        if self.name.trim().is_empty() {
-            errors.push(FieldError::new("name", "required", "name is required"));
-        } else if self.name.len() > 255 {
-            errors.push(FieldError::new(
-                "name",
-                "max_length",
-                "name must be 255 characters or fewer",
-            ));
-        }
-
-        if self.event_type_id.trim().is_empty() {
-            errors.push(FieldError::new(
-                "event_type_id",
-                "required",
-                "event_type_id is required",
-            ));
-        }
-
-        if self.endpoint_ids.is_empty() {
-            errors.push(FieldError::new(
-                "endpoint_ids",
-                "min_items",
-                "endpoint_ids must contain at least one entry",
-            ));
-        }
-
-        if self.cron_expression.trim().is_empty() {
-            errors.push(FieldError::new(
-                "cron_expression",
-                "required",
-                "cron_expression is required",
-            ));
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(AppError::Validation(errors))
-        }
+        Validate::validate(self).map_err(AppError::from)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct UpdateScheduleRequest {
+    #[validate(custom(function = "validate_not_blank", message = "name cannot be empty"))]
+    #[validate(length(max = 255, message = "name must be 255 characters or fewer"))]
     pub name: Option<String>,
     pub description: Option<String>,
+    #[validate(length(min = 1, message = "endpoint_ids must contain at least one entry"))]
     pub endpoint_ids: Option<Vec<String>>,
     pub payload: Option<serde_json::Value>,
+    #[validate(custom(function = "validate_not_blank", message = "cron_expression cannot be empty"))]
     pub cron_expression: Option<String>,
     pub timezone: Option<String>,
 }
 
 impl UpdateScheduleRequest {
     pub fn validate(&self) -> Result<(), AppError> {
-        let mut errors = Vec::new();
-
-        if let Some(ref n) = self.name {
-            if n.trim().is_empty() {
-                errors.push(FieldError::new("name", "required", "name cannot be empty"));
-            } else if n.len() > 255 {
-                errors.push(FieldError::new(
-                    "name",
-                    "max_length",
-                    "name must be 255 characters or fewer",
-                ));
-            }
-        }
-        if let Some(ref expr) = self.cron_expression {
-            if expr.trim().is_empty() {
-                errors.push(FieldError::new(
-                    "cron_expression",
-                    "required",
-                    "cron_expression cannot be empty",
-                ));
-            }
-        }
-        if let Some(ref ids) = self.endpoint_ids {
-            if ids.is_empty() {
-                errors.push(FieldError::new(
-                    "endpoint_ids",
-                    "min_items",
-                    "endpoint_ids must contain at least one entry",
-                ));
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(AppError::Validation(errors))
-        }
+        Validate::validate(self).map_err(AppError::from)
     }
 }
 
@@ -182,7 +117,7 @@ pub struct ListExecutionsQuery {
 
 // --- Response types ---
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ScheduleResponse {
     pub id: String,
     pub name: String,

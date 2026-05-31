@@ -1,11 +1,12 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 
 use crate::{
     common::{
+        idempotency,
         types::RequestContext,
         PublicUuid, ValidatedJson,
     },
@@ -34,8 +35,23 @@ fn service(state: AppState) -> UserService {
 
 pub async fn create_user(
     State(state): State<AppState>,
+    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserResponse>), AppError> {
+    if let Some(key) = idempotency::extract_key(&headers)? {
+        let hash = idempotency::body_hash(&payload);
+        let redis = state.redis.clone();
+        let user = idempotency::resolve(
+            &redis,
+            "users",
+            &key,
+            &hash,
+            move || async move { service(state).create(payload, make_ctx()).await },
+        )
+        .await?;
+        return Ok((StatusCode::CREATED, Json(user)));
+    }
+
     let user = service(state).create(payload, make_ctx()).await?;
     Ok((StatusCode::CREATED, Json(user)))
 }

@@ -1,11 +1,12 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 
 use crate::{
     common::{
+        idempotency,
         types::{PaginatedResponse, RequestContext},
         PublicUuid, ValidatedJson,
     },
@@ -38,8 +39,26 @@ fn svc(state: AppState) -> EventService {
 
 pub async fn create_event(
     State(state): State<AppState>,
+    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateEventRequest>,
 ) -> Result<(StatusCode, Json<EventResponse>), AppError> {
+    if let Some(key) = idempotency::extract_key(&headers)? {
+        let hash = idempotency::body_hash(&payload);
+        let redis = state.redis.clone();
+        let ev = idempotency::resolve(
+            &redis,
+            "events",
+            &key,
+            &hash,
+            move || async move {
+                let (ev, _) = svc(state).create(payload, make_ctx()).await?;
+                Ok(ev)
+            },
+        )
+        .await?;
+        return Ok((StatusCode::CREATED, Json(ev)));
+    }
+
     let (ev, created) = svc(state).create(payload, make_ctx()).await?;
     let status = if created { StatusCode::CREATED } else { StatusCode::OK };
     Ok((status, Json(ev)))

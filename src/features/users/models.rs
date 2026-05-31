@@ -4,8 +4,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
 use uuid::Uuid;
+use validator::Validate;
 
-use crate::error::{AppError, FieldError};
+use crate::common::validators::validate_not_blank;
+use crate::error::AppError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "user_status", rename_all = "lowercase")]
@@ -45,11 +47,15 @@ pub struct User {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct CreateUserRequest {
     pub organization_id: Uuid,
     pub tenant_id: Uuid,
+    #[validate(custom(function = "validate_not_blank", message = "email is required"))]
+    #[validate(email(message = "email is not a valid email address"))]
+    #[validate(length(max = 64, message = "email must be 64 characters or fewer"))]
     pub email: String,
+    #[validate(length(max = 13, message = "phone must be 13 characters or fewer"))]
     pub phone: Option<String>,
     pub metadata: Option<HashMap<String, String>>,
     pub tags: Option<HashMap<String, String>>,
@@ -59,43 +65,13 @@ pub struct CreateUserRequest {
 
 impl CreateUserRequest {
     pub fn validate(&self) -> Result<(), AppError> {
-        let mut errors = Vec::new();
-
-        let email = self.email.trim();
-        if email.is_empty() {
-            errors.push(FieldError::new("email", "required", "email is required"));
-        } else if email.len() > 64 {
-            errors.push(FieldError::new(
-                "email",
-                "max_length",
-                "email must be 64 characters or fewer",
-            ));
-        } else if !email.contains('@') {
-            errors.push(
-                FieldError::new("email", "invalid_format", "email is not a valid email address")
-                    .with_value(email.to_owned()),
-            );
-        }
-
-        if let Some(ref phone) = self.phone {
-            if phone.len() > 13 {
-                errors.push(
-                    FieldError::new("phone", "max_length", "phone must be 13 characters or fewer")
-                        .with_value(phone.clone()),
-                );
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(AppError::Validation(errors))
-        }
+        Validate::validate(self).map_err(AppError::from)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct UpdateUserRequest {
+    #[validate(length(max = 13, message = "phone must be 13 characters or fewer"))]
     pub phone: Option<String>,
     pub metadata: Option<HashMap<String, String>>,
     pub tags: Option<HashMap<String, String>>,
@@ -104,22 +80,7 @@ pub struct UpdateUserRequest {
 
 impl UpdateUserRequest {
     pub fn validate(&self) -> Result<(), AppError> {
-        let mut errors = Vec::new();
-
-        if let Some(ref phone) = self.phone {
-            if phone.len() > 13 {
-                errors.push(
-                    FieldError::new("phone", "max_length", "phone must be 13 characters or fewer")
-                        .with_value(phone.clone()),
-                );
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(AppError::Validation(errors))
-        }
+        Validate::validate(self).map_err(AppError::from)
     }
 }
 
@@ -128,7 +89,7 @@ pub struct LockUserRequest {
     pub locked_until: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UserResponse {
     pub id: String,
     pub organization_id: Uuid,

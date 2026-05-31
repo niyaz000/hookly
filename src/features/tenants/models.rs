@@ -4,8 +4,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
 use uuid::Uuid;
+use validator::Validate;
 
-use crate::error::{AppError, FieldError};
+use crate::common::validators::validate_not_blank;
+use crate::error::AppError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "tenant_status", rename_all = "lowercase")]
@@ -35,9 +37,11 @@ pub struct Tenant {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct CreateTenantRequest {
     pub organization_id: Uuid,
+    #[validate(custom(function = "validate_not_blank", message = "name is required"))]
+    #[validate(length(max = 255, message = "name must be 255 characters or fewer"))]
     pub name: String,
     pub description: Option<String>,
     pub tags: Option<HashMap<String, String>>,
@@ -47,28 +51,14 @@ pub struct CreateTenantRequest {
 
 impl CreateTenantRequest {
     pub fn validate(&self) -> Result<(), AppError> {
-        let mut errors = Vec::new();
-
-        if self.name.trim().is_empty() {
-            errors.push(FieldError::new("name", "required", "name is required"));
-        } else if self.name.len() > 255 {
-            errors.push(FieldError::new(
-                "name",
-                "max_length",
-                "name must be 255 characters or fewer",
-            ));
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(AppError::Validation(errors))
-        }
+        Validate::validate(self).map_err(AppError::from)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct UpdateTenantRequest {
+    #[validate(custom(function = "validate_not_blank", message = "name cannot be empty"))]
+    #[validate(length(max = 255, message = "name must be 255 characters or fewer"))]
     pub name: Option<String>,
     pub description: Option<String>,
     pub tags: Option<HashMap<String, String>>,
@@ -78,29 +68,11 @@ pub struct UpdateTenantRequest {
 
 impl UpdateTenantRequest {
     pub fn validate(&self) -> Result<(), AppError> {
-        let mut errors = Vec::new();
-
-        if let Some(ref n) = self.name {
-            if n.trim().is_empty() {
-                errors.push(FieldError::new("name", "required", "name cannot be empty"));
-            } else if n.len() > 255 {
-                errors.push(FieldError::new(
-                    "name",
-                    "max_length",
-                    "name must be 255 characters or fewer",
-                ));
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(AppError::Validation(errors))
-        }
+        Validate::validate(self).map_err(AppError::from)
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TenantResponse {
     pub id: String,
     pub organization_id: Uuid,

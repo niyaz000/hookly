@@ -4,8 +4,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
 use uuid::Uuid;
+use validator::Validate;
 
-use crate::error::{AppError, FieldError};
+use crate::common::validators::{validate_not_blank, validate_slug};
+use crate::error::AppError;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "organization_status", rename_all = "lowercase")]
@@ -38,12 +40,20 @@ pub struct Organization {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct CreateOrganizationRequest {
+    #[validate(custom(function = "validate_not_blank", message = "name is required"))]
+    #[validate(length(max = 255, message = "name must be 255 characters or fewer"))]
     pub name: String,
+    #[validate(custom(function = "validate_not_blank", message = "slug is required"))]
+    #[validate(length(max = 64, message = "slug must be 64 characters or fewer"))]
+    #[validate(custom(function = "validate_slug", message = "slug must be lowercase alphanumeric and hyphens, not starting or ending with a hyphen"))]
     pub slug: String,
+    #[validate(length(max = 64, message = "billing_email must be 64 characters or fewer"))]
     pub billing_email: Option<String>,
+    #[validate(length(max = 32, message = "stripe_customer_id must be 32 characters or fewer"))]
     pub stripe_customer_id: Option<String>,
+    #[validate(length(max = 64, message = "external_id must be 64 characters or fewer"))]
     pub external_id: Option<String>,
     pub tags: Option<HashMap<String, String>>,
     pub metadata: Option<HashMap<String, String>>,
@@ -52,71 +62,24 @@ pub struct CreateOrganizationRequest {
 
 impl CreateOrganizationRequest {
     pub fn validate(&self) -> Result<(), AppError> {
-        let mut errors = Vec::new();
-
-        if self.name.trim().is_empty() {
-            errors.push(FieldError::new("name", "required", "name is required"));
-        } else if self.name.len() > 255 {
-            errors.push(FieldError::new(
-                "name",
-                "max_length",
-                "name must be 255 characters or fewer",
-            ));
-        }
-
-        collect_slug_errors(&self.slug, &mut errors);
-
-        if let Some(ref e) = self.billing_email {
-            if e.len() > 64 {
-                errors.push(
-                    FieldError::new(
-                        "billing_email",
-                        "max_length",
-                        "billing_email must be 64 characters or fewer",
-                    )
-                    .with_value(e.clone()),
-                );
-            }
-        }
-        if let Some(ref s) = self.stripe_customer_id {
-            if s.len() > 32 {
-                errors.push(
-                    FieldError::new(
-                        "stripe_customer_id",
-                        "max_length",
-                        "stripe_customer_id must be 32 characters or fewer",
-                    )
-                    .with_value(s.clone()),
-                );
-            }
-        }
-        if let Some(ref e) = self.external_id {
-            if e.len() > 64 {
-                errors.push(
-                    FieldError::new(
-                        "external_id",
-                        "max_length",
-                        "external_id must be 64 characters or fewer",
-                    )
-                    .with_value(e.clone()),
-                );
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(AppError::Validation(errors))
-        }
+        Validate::validate(self).map_err(AppError::from)
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct UpdateOrganizationRequest {
+    #[validate(custom(function = "validate_not_blank", message = "name cannot be empty"))]
+    #[validate(length(max = 255, message = "name must be 255 characters or fewer"))]
     pub name: Option<String>,
+    #[validate(custom(function = "validate_not_blank", message = "slug cannot be empty"))]
+    #[validate(length(max = 64, message = "slug must be 64 characters or fewer"))]
+    #[validate(custom(function = "validate_slug", message = "slug must be lowercase alphanumeric and hyphens, not starting or ending with a hyphen"))]
     pub slug: Option<String>,
+    #[validate(length(max = 64, message = "billing_email must be 64 characters or fewer"))]
     pub billing_email: Option<String>,
+    #[validate(length(max = 32, message = "stripe_customer_id must be 32 characters or fewer"))]
     pub stripe_customer_id: Option<String>,
+    #[validate(length(max = 64, message = "external_id must be 64 characters or fewer"))]
     pub external_id: Option<String>,
     pub tags: Option<HashMap<String, String>>,
     pub metadata: Option<HashMap<String, String>>,
@@ -125,94 +88,11 @@ pub struct UpdateOrganizationRequest {
 
 impl UpdateOrganizationRequest {
     pub fn validate(&self) -> Result<(), AppError> {
-        let mut errors = Vec::new();
-
-        if let Some(ref n) = self.name {
-            if n.trim().is_empty() {
-                errors.push(FieldError::new("name", "required", "name cannot be empty"));
-            } else if n.len() > 255 {
-                errors.push(FieldError::new(
-                    "name",
-                    "max_length",
-                    "name must be 255 characters or fewer",
-                ));
-            }
-        }
-        if let Some(ref s) = self.slug {
-            collect_slug_errors(s, &mut errors);
-        }
-        if let Some(ref e) = self.billing_email {
-            if e.len() > 64 {
-                errors.push(
-                    FieldError::new(
-                        "billing_email",
-                        "max_length",
-                        "billing_email must be 64 characters or fewer",
-                    )
-                    .with_value(e.clone()),
-                );
-            }
-        }
-        if let Some(ref s) = self.stripe_customer_id {
-            if s.len() > 32 {
-                errors.push(
-                    FieldError::new(
-                        "stripe_customer_id",
-                        "max_length",
-                        "stripe_customer_id must be 32 characters or fewer",
-                    )
-                    .with_value(s.clone()),
-                );
-            }
-        }
-        if let Some(ref e) = self.external_id {
-            if e.len() > 64 {
-                errors.push(
-                    FieldError::new(
-                        "external_id",
-                        "max_length",
-                        "external_id must be 64 characters or fewer",
-                    )
-                    .with_value(e.clone()),
-                );
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(AppError::Validation(errors))
-        }
+        Validate::validate(self).map_err(AppError::from)
     }
 }
 
-fn collect_slug_errors(slug: &str, errors: &mut Vec<FieldError>) {
-    if slug.trim().is_empty() {
-        errors.push(FieldError::new("slug", "required", "slug is required"));
-    } else if slug.len() > 64 {
-        errors.push(
-            FieldError::new("slug", "max_length", "slug must be 64 characters or fewer")
-                .with_value(slug.to_owned()),
-        );
-    } else {
-        let chars_valid = slug
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        let no_leading_trailing_hyphen = !slug.starts_with('-') && !slug.ends_with('-');
-        if !chars_valid || !no_leading_trailing_hyphen {
-            errors.push(
-                FieldError::new(
-                    "slug",
-                    "invalid_format",
-                    "slug must be lowercase alphanumeric and hyphens, not starting or ending with a hyphen",
-                )
-                .with_value(slug.to_owned()),
-            );
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct OrganizationResponse {
     pub id: String,
     pub name: String,

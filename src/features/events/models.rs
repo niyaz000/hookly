@@ -31,7 +31,7 @@ pub struct EventRow {
 
 // --- Request types ---
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct CreateEventRequest {
     pub application_id: String,
     pub event_type_id: String,
@@ -64,7 +64,7 @@ fn default_limit() -> u32 {
 
 // --- Response types ---
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct EventResponse {
     pub id: String,
     pub application_id: String,

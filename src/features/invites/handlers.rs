@@ -1,11 +1,12 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 
 use crate::{
     common::{
+        idempotency,
         types::RequestContext,
         PublicUuid, ValidatedJson,
     },
@@ -34,12 +35,28 @@ fn service(state: &AppState) -> InviteService {
 
 pub async fn create_invite(
     State(state): State<AppState>,
+    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateInviteRequest>,
 ) -> Result<(StatusCode, Json<InviteResponse>), AppError> {
-    let ctx = make_ctx();
-    let invite = service(&state)
-        .create(payload, ctx.request_id, state.email.as_ref())
+    if let Some(key) = idempotency::extract_key(&headers)? {
+        let hash = idempotency::body_hash(&payload);
+        let redis = state.redis.clone();
+        let invite = idempotency::resolve(
+            &redis,
+            "invites",
+            &key,
+            &hash,
+            move || async move {
+                let ctx = make_ctx();
+                service(&state).create(payload, ctx.request_id, state.email.as_ref()).await
+            },
+        )
         .await?;
+        return Ok((StatusCode::CREATED, Json(invite)));
+    }
+
+    let ctx = make_ctx();
+    let invite = service(&state).create(payload, ctx.request_id, state.email.as_ref()).await?;
     Ok((StatusCode::CREATED, Json(invite)))
 }
 

@@ -1,11 +1,12 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 
 use crate::{
     common::{
+        idempotency,
         types::RequestContext,
         PublicUuid, ValidatedJson,
     },
@@ -34,8 +35,23 @@ fn service(state: AppState) -> OrganizationService {
 
 pub async fn create_organization(
     State(state): State<AppState>,
+    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateOrganizationRequest>,
 ) -> Result<(StatusCode, Json<OrganizationResponse>), AppError> {
+    if let Some(key) = idempotency::extract_key(&headers)? {
+        let hash = idempotency::body_hash(&payload);
+        let redis = state.redis.clone();
+        let org = idempotency::resolve(
+            &redis,
+            "organizations",
+            &key,
+            &hash,
+            move || async move { service(state).create(payload, make_ctx()).await },
+        )
+        .await?;
+        return Ok((StatusCode::CREATED, Json(org)));
+    }
+
     let org = service(state).create(payload, make_ctx()).await?;
     Ok((StatusCode::CREATED, Json(org)))
 }

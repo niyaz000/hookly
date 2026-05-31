@@ -82,7 +82,7 @@ pub struct SecretRow {
 
 // --- Request types ---
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct CreateEndpointRequest {
     pub application_id: String,
     pub description: Option<String>,
@@ -133,7 +133,7 @@ fn default_limit() -> u32 {
 
 // --- Response types ---
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct EndpointResponse {
     pub id: String,
     pub application_id: String,

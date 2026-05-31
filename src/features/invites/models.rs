@@ -2,8 +2,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
 use uuid::Uuid;
+use validator::Validate;
 
-use crate::error::{AppError, FieldError};
+use crate::common::validators::{validate_future_date, validate_not_blank};
+use crate::error::AppError;
 
 // --- DB row structs ---
 
@@ -51,12 +53,18 @@ pub struct TenantMemberRow {
 
 // --- Request types ---
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct CreateInviteRequest {
+    #[validate(custom(function = "validate_not_blank", message = "user_email is required"))]
+    #[validate(email(message = "user_email is not a valid email address"))]
+    #[validate(length(max = 255, message = "user_email must be 255 characters or fewer"))]
     pub user_email: String,
+    #[validate(custom(function = "validate_not_blank", message = "role is required"))]
+    #[validate(length(max = 50, message = "role must be 50 characters or fewer"))]
     pub role: String,
     pub tenant_id: Uuid,
     pub organization_id: Uuid,
+    #[validate(custom(function = "validate_future_date", message = "expires_at must be a future date"))]
     pub expires_at: Option<DateTime<Utc>>,
     pub tags: Option<serde_json::Value>,
     pub metadata: Option<serde_json::Value>,
@@ -65,54 +73,7 @@ pub struct CreateInviteRequest {
 
 impl CreateInviteRequest {
     pub fn validate(&self) -> Result<(), AppError> {
-        let mut errors = Vec::new();
-
-        let email = self.user_email.trim();
-        if email.is_empty() {
-            errors.push(FieldError::new("user_email", "required", "user_email is required"));
-        } else if email.len() > 255 {
-            errors.push(FieldError::new(
-                "user_email",
-                "max_length",
-                "user_email must be 255 characters or fewer",
-            ));
-        } else if !email.contains('@') {
-            errors.push(
-                FieldError::new(
-                    "user_email",
-                    "invalid_format",
-                    "user_email is not a valid email address",
-                )
-                .with_value(email.to_owned()),
-            );
-        }
-
-        let role = self.role.trim();
-        if role.is_empty() {
-            errors.push(FieldError::new("role", "required", "role is required"));
-        } else if role.len() > 50 {
-            errors.push(FieldError::new(
-                "role",
-                "max_length",
-                "role must be 50 characters or fewer",
-            ));
-        }
-
-        if let Some(ref exp) = self.expires_at {
-            if *exp <= Utc::now() {
-                errors.push(FieldError::new(
-                    "expires_at",
-                    "invalid_value",
-                    "expires_at must be a future date",
-                ));
-            }
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(AppError::Validation(errors))
-        }
+        Validate::validate(self).map_err(AppError::from)
     }
 }
 
@@ -138,7 +99,7 @@ pub struct ListInvitesQuery {
 
 // --- Response types ---
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct InviteResponse {
     pub id: String,
     pub tenant_id: Uuid,

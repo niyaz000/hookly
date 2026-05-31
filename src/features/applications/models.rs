@@ -29,7 +29,7 @@ pub struct Application {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct CreateApplicationRequest {
     pub tenant_id: Uuid,
     pub organization_id: Uuid,
@@ -38,7 +38,7 @@ pub struct CreateApplicationRequest {
     pub tags: HashMap<String, String>,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct CreateApplicationResponse {
     pub id: String,
     pub tenant_id: Uuid,

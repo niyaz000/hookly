@@ -1,11 +1,12 @@
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 
 use crate::{
     common::{
+        idempotency,
         types::RequestContext,
         PublicUuid, ValidatedJson,
     },
@@ -27,11 +28,30 @@ fn make_ctx() -> RequestContext {
 
 pub async fn create_application(
     State(state): State<AppState>,
+    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateApplicationRequest>,
 ) -> Result<(StatusCode, Json<CreateApplicationResponse>), AppError> {
-    let service = ApplicationService::new(ApplicationRepository::new(state.db));
-    let application = service.create(payload, make_ctx()).await?;
-    Ok((StatusCode::CREATED, Json(CreateApplicationResponse::from(application))))
+    if let Some(key) = idempotency::extract_key(&headers)? {
+        let hash = idempotency::body_hash(&payload);
+        let redis = state.redis.clone();
+        let resp = idempotency::resolve(
+            &redis,
+            "applications",
+            &key,
+            &hash,
+            move || async move {
+                let svc = ApplicationService::new(ApplicationRepository::new(state.db));
+                let app = svc.create(payload, make_ctx()).await?;
+                Ok(CreateApplicationResponse::from(app))
+            },
+        )
+        .await?;
+        return Ok((StatusCode::CREATED, Json(resp)));
+    }
+
+    let svc = ApplicationService::new(ApplicationRepository::new(state.db));
+    let app = svc.create(payload, make_ctx()).await?;
+    Ok((StatusCode::CREATED, Json(CreateApplicationResponse::from(app))))
 }
 
 pub async fn get_by_id(

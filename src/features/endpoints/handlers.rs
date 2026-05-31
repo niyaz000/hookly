@@ -1,11 +1,12 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 
 use crate::{
     common::{
+        idempotency,
         types::{PaginatedResponse, RequestContext},
         PublicUuid, ValidatedJson,
     },
@@ -34,8 +35,23 @@ fn svc(state: AppState) -> EndpointService {
 
 pub async fn create_endpoint(
     State(state): State<AppState>,
+    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateEndpointRequest>,
 ) -> Result<(StatusCode, Json<EndpointResponse>), AppError> {
+    if let Some(key) = idempotency::extract_key(&headers)? {
+        let hash = idempotency::body_hash(&payload);
+        let redis = state.redis.clone();
+        let ep = idempotency::resolve(
+            &redis,
+            "endpoints",
+            &key,
+            &hash,
+            move || async move { svc(state).create(payload, make_ctx()).await },
+        )
+        .await?;
+        return Ok((StatusCode::CREATED, Json(ep)));
+    }
+
     let ep = svc(state).create(payload, make_ctx()).await?;
     Ok((StatusCode::CREATED, Json(ep)))
 }

@@ -1,11 +1,12 @@
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     Json,
 };
 
 use crate::{
     common::{
+        idempotency,
         types::RequestContext,
         PublicUuid, ValidatedJson,
     },
@@ -35,8 +36,23 @@ fn service(state: AppState) -> ScheduleService {
 
 pub async fn create_schedule(
     State(state): State<AppState>,
+    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateScheduleRequest>,
 ) -> Result<(StatusCode, Json<ScheduleResponse>), AppError> {
+    if let Some(key) = idempotency::extract_key(&headers)? {
+        let hash = idempotency::body_hash(&payload);
+        let redis = state.redis.clone();
+        let schedule = idempotency::resolve(
+            &redis,
+            "schedules",
+            &key,
+            &hash,
+            move || async move { service(state).create(payload, make_ctx()).await },
+        )
+        .await?;
+        return Ok((StatusCode::CREATED, Json(schedule)));
+    }
+
     let schedule = service(state).create(payload, make_ctx()).await?;
     Ok((StatusCode::CREATED, Json(schedule)))
 }
