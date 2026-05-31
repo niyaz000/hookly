@@ -1,7 +1,14 @@
-use axum::{extract::{Path, State}, http::StatusCode, Json};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    Json,
+};
 
 use crate::{
-    common::{PublicUuid, types::{ApiResponse, RequestContext}},
+    common::{
+        types::RequestContext,
+        PublicUuid, ValidatedJson,
+    },
     error::AppError,
     features::applications::{
         models::{CreateApplicationRequest, CreateApplicationResponse, GetApplicationResponse},
@@ -20,34 +27,20 @@ fn make_ctx() -> RequestContext {
 
 pub async fn create_application(
     State(state): State<AppState>,
-    Json(payload): Json<CreateApplicationRequest>,
-) -> Result<(StatusCode, Json<ApiResponse<CreateApplicationResponse>>), AppError> {
+    ValidatedJson(payload): ValidatedJson<CreateApplicationRequest>,
+) -> Result<(StatusCode, Json<CreateApplicationResponse>), AppError> {
     let service = ApplicationService::new(ApplicationRepository::new(state.db));
     let application = service.create(payload, make_ctx()).await?;
-
-    Ok((
-        StatusCode::CREATED,
-        Json(ApiResponse {
-            success: true,
-            data: CreateApplicationResponse::from(application),
-        }),
-    ))
+    Ok((StatusCode::CREATED, Json(CreateApplicationResponse::from(application))))
 }
 
 pub async fn get_by_id(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
-) -> Result<(StatusCode, Json<ApiResponse<GetApplicationResponse>>), AppError> {
+) -> Result<(StatusCode, Json<GetApplicationResponse>), AppError> {
     let service = ApplicationService::new(ApplicationRepository::new(state.db));
     let application = service.get_by_id(public_id).await?;
-
-    Ok((
-        StatusCode::OK,
-        Json(ApiResponse {
-            success: true,
-            data: application,
-        }),
-    ))
+    Ok((StatusCode::OK, Json(application)))
 }
 
 pub async fn delete_by_id(
@@ -62,15 +55,8 @@ pub async fn delete_by_id(
 pub async fn restore_by_id(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
-) -> Result<(StatusCode, Json<ApiResponse<GetApplicationResponse>>), AppError> {
+) -> Result<(StatusCode, Json<GetApplicationResponse>), AppError> {
     let service = ApplicationService::new(ApplicationRepository::new(state.db));
     let application = service.restore_by_id(public_id, make_ctx()).await?;
-
-    Ok((
-        StatusCode::OK,
-        Json(ApiResponse {
-            success: true,
-            data: application,
-        }),
-    ))
+    Ok((StatusCode::OK, Json(application)))
 }

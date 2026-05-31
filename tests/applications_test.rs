@@ -1,4 +1,7 @@
-use axum::{body::Body, http::{Request, StatusCode}};
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
 use redis::Client as RedisClient;
 use serde_json::{json, Value};
 use sqlx::PgPool;
@@ -8,8 +11,16 @@ use uuid::Uuid;
 use hookly::{router::create_router, state::AppState};
 
 fn test_state(pool: PgPool) -> AppState {
+    use hookly::common::TenantCrypto;
     let redis = RedisClient::open("redis://127.0.0.1/").expect("Redis URL invalid");
-    AppState { db: pool, redis }
+    // 32-byte key encoded as standard base64 (test-only placeholder)
+    let crypto =
+        TenantCrypto::new("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").expect("test crypto key");
+    AppState {
+        db: pool,
+        redis,
+        crypto,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -25,7 +36,9 @@ async fn post_json(app: axum::Router, uri: &str, body: Value) -> (StatusCode, Va
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     (status, serde_json::from_slice(&bytes).unwrap())
 }
 
@@ -37,7 +50,9 @@ async fn send(app: axum::Router, method: &str, uri: &str) -> (StatusCode, Value)
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
     let status = response.status();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json = if bytes.is_empty() {
         Value::Null
     } else {
@@ -61,7 +76,6 @@ async fn create_test_application(app: axum::Router) -> Value {
 
 fn assert_application_fields(data: &Value) {
     assert!(!data["id"].as_str().unwrap_or("").is_empty());
-    assert!(!data["public_id"].as_str().unwrap_or("").is_empty());
     assert!(!data["created_by"].as_str().unwrap_or("").is_empty());
     assert!(!data["updated_by"].as_str().unwrap_or("").is_empty());
     assert!(data["created_at"].is_string());
@@ -87,14 +101,11 @@ async fn test_create_application_success(pool: PgPool) {
     let (status, json) = post_json(app, "/api/v1/applications", body).await;
 
     assert_eq!(status, StatusCode::CREATED);
-    assert_eq!(json["success"], true);
-
-    let data = &json["data"];
-    assert_application_fields(data);
-    assert_eq!(data["name"], "my-test-app");
-    assert_eq!(data["description"], "integration test application");
-    assert_eq!(data["tags"]["env"], "test");
-    assert_eq!(data["state"], "Active");
+    assert_application_fields(&json);
+    assert_eq!(json["name"], "my-test-app");
+    assert_eq!(json["description"], "integration test application");
+    assert_eq!(json["tags"]["env"], "test");
+    assert_eq!(json["state"], "Active");
 }
 
 // ---------------------------------------------------------------------------
@@ -105,17 +116,14 @@ async fn test_create_application_success(pool: PgPool) {
 async fn test_get_application_success(pool: PgPool) {
     let app = create_router(test_state(pool));
     let created = create_test_application(app.clone()).await;
-    let public_id = created["data"]["public_id"].as_str().unwrap();
+    let id = created["id"].as_str().unwrap();
 
-    let (status, json) = send(app, "GET", &format!("/api/v1/applications/{public_id}")).await;
+    let (status, json) = send(app, "GET", &format!("/api/v1/applications/{id}")).await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["success"], true);
-
-    let data = &json["data"];
-    assert_application_fields(data);
-    assert_eq!(data["public_id"], public_id);
-    assert_eq!(data["state"], "Active");
+    assert_application_fields(&json);
+    assert_eq!(json["id"], id);
+    assert_eq!(json["state"], "Active");
 }
 
 #[sqlx::test(migrations = "./migrations")]
@@ -135,9 +143,9 @@ async fn test_get_application_not_found(pool: PgPool) {
 async fn test_delete_application_success(pool: PgPool) {
     let app = create_router(test_state(pool));
     let created = create_test_application(app.clone()).await;
-    let public_id = created["data"]["public_id"].as_str().unwrap();
+    let id = created["id"].as_str().unwrap();
 
-    let (status, _) = send(app, "DELETE", &format!("/api/v1/applications/{public_id}")).await;
+    let (status, _) = send(app, "DELETE", &format!("/api/v1/applications/{id}")).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 }
 
@@ -145,20 +153,20 @@ async fn test_delete_application_success(pool: PgPool) {
 async fn test_delete_marks_state_as_inactive(pool: PgPool) {
     let app = create_router(test_state(pool));
     let created = create_test_application(app.clone()).await;
-    let public_id = created["data"]["public_id"].as_str().unwrap();
+    let id = created["id"].as_str().unwrap();
 
-    send(app.clone(), "DELETE", &format!("/api/v1/applications/{public_id}")).await;
+    send(app.clone(), "DELETE", &format!("/api/v1/applications/{id}")).await;
 
-    let (_, json) = send(app, "GET", &format!("/api/v1/applications/{public_id}")).await;
-    assert_eq!(json["data"]["state"], "Inactive");
+    let (_, json) = send(app, "GET", &format!("/api/v1/applications/{id}")).await;
+    assert_eq!(json["state"], "Inactive");
 }
 
 #[sqlx::test(migrations = "./migrations")]
 async fn test_delete_application_is_noop_when_already_deleted(pool: PgPool) {
     let app = create_router(test_state(pool));
     let created = create_test_application(app.clone()).await;
-    let public_id = created["data"]["public_id"].as_str().unwrap();
-    let uri = format!("/api/v1/applications/{public_id}");
+    let id = created["id"].as_str().unwrap();
+    let uri = format!("/api/v1/applications/{id}");
 
     let (first, _) = send(app.clone(), "DELETE", &uri).await;
     assert_eq!(first, StatusCode::NO_CONTENT);
@@ -182,48 +190,45 @@ async fn test_delete_application_not_found_is_noop(pool: PgPool) {
 async fn test_restore_application_success(pool: PgPool) {
     let app = create_router(test_state(pool));
     let created = create_test_application(app.clone()).await;
-    let public_id = created["data"]["public_id"].as_str().unwrap();
+    let id = created["id"].as_str().unwrap();
 
-    send(app.clone(), "DELETE", &format!("/api/v1/applications/{public_id}")).await;
+    send(app.clone(), "DELETE", &format!("/api/v1/applications/{id}")).await;
 
-    let (status, json) = send(app, "POST", &format!("/api/v1/applications/{public_id}/restore")).await;
+    let (status, json) = send(app, "POST", &format!("/api/v1/applications/{id}/restore")).await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["success"], true);
-
-    let data = &json["data"];
-    assert_application_fields(data);
-    assert_eq!(data["public_id"], public_id);
-    assert_eq!(data["state"], "Active");
+    assert_application_fields(&json);
+    assert_eq!(json["id"], id);
+    assert_eq!(json["state"], "Active");
 }
 
 #[sqlx::test(migrations = "./migrations")]
 async fn test_restore_clears_deleted_at(pool: PgPool) {
     let app = create_router(test_state(pool));
     let created = create_test_application(app.clone()).await;
-    let public_id = created["data"]["public_id"].as_str().unwrap();
+    let id = created["id"].as_str().unwrap();
 
-    send(app.clone(), "DELETE", &format!("/api/v1/applications/{public_id}")).await;
-    send(app.clone(), "POST", &format!("/api/v1/applications/{public_id}/restore")).await;
+    send(app.clone(), "DELETE", &format!("/api/v1/applications/{id}")).await;
+    send(app.clone(), "POST", &format!("/api/v1/applications/{id}/restore")).await;
 
-    // A second delete should work (proves deleted_at was cleared)
-    let (status, _) = send(app.clone(), "DELETE", &format!("/api/v1/applications/{public_id}")).await;
+    // A second delete should work (proves the application was properly restored)
+    let (status, _) = send(app.clone(), "DELETE", &format!("/api/v1/applications/{id}")).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    let (_, json) = send(app, "GET", &format!("/api/v1/applications/{public_id}")).await;
-    assert_eq!(json["data"]["state"], "Inactive");
+    let (_, json) = send(app, "GET", &format!("/api/v1/applications/{id}")).await;
+    assert_eq!(json["state"], "Inactive");
 }
 
 #[sqlx::test(migrations = "./migrations")]
 async fn test_restore_is_noop_when_already_active(pool: PgPool) {
     let app = create_router(test_state(pool));
     let created = create_test_application(app.clone()).await;
-    let public_id = created["data"]["public_id"].as_str().unwrap();
+    let id = created["id"].as_str().unwrap();
 
-    let (status, json) = send(app, "POST", &format!("/api/v1/applications/{public_id}/restore")).await;
+    let (status, json) = send(app, "POST", &format!("/api/v1/applications/{id}/restore")).await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(json["data"]["state"], "Active");
+    assert_eq!(json["state"], "Active");
 }
 
 #[sqlx::test(migrations = "./migrations")]

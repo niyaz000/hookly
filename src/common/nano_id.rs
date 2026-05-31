@@ -35,11 +35,21 @@ impl fmt::Display for NanoIdError {
 
 impl std::error::Error for NanoIdError {}
 
+impl Default for NanoId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NanoId {
     pub const LENGTH: usize = LEN;
 
     pub fn new() -> Self {
         Self(nanoid::nanoid!(LEN, &ALPHANUMERIC))
+    }
+
+    pub fn generate(len: usize) -> String {
+        nanoid::nanoid!(len, &ALPHANUMERIC)
     }
 
     pub fn into_inner(self) -> String {

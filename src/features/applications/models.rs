@@ -40,8 +40,7 @@ pub struct CreateApplicationRequest {
 
 #[derive(Serialize, Debug)]
 pub struct CreateApplicationResponse {
-    pub id: Uuid,
-    pub public_id: String,
+    pub id: String,
     pub tenant_id: Uuid,
     pub organization_id: Uuid,
     pub name: String,
@@ -56,8 +55,7 @@ pub struct CreateApplicationResponse {
 
 #[derive(Serialize, Debug)]
 pub struct GetApplicationResponse {
-    pub id: Uuid,
-    pub public_id: String,
+    pub id: String,
     pub tenant_id: Uuid,
     pub organization_id: Uuid,
     pub name: String,
@@ -73,8 +71,7 @@ pub struct GetApplicationResponse {
 impl From<Application> for CreateApplicationResponse {
     fn from(app: Application) -> Self {
         Self {
-            id: app.id,
-            public_id: app.public_id,
+            id: app.public_id,
             tenant_id: app.tenant_id,
             organization_id: app.organization_id,
             name: app.name,
@@ -92,8 +89,7 @@ impl From<Application> for CreateApplicationResponse {
 impl From<Application> for GetApplicationResponse {
     fn from(app: Application) -> Self {
         Self {
-            id: app.id,
-            public_id: app.public_id,
+            id: app.public_id,
             tenant_id: app.tenant_id,
             organization_id: app.organization_id,
             name: app.name,

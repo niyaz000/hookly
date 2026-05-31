@@ -1,4 +1,4 @@
-.PHONY: build run install migrate test
+.PHONY: build run install migrate test fmt lint
 
 build:
 	cargo build
@@ -14,3 +14,10 @@ migrate:
 
 test:
 	cargo test
+
+fmt:
+	cargo fmt --all
+
+lint:
+	cargo fmt --all -- --check
+	cargo clippy --all-targets -- -D warnings

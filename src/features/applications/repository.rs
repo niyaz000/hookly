@@ -1,12 +1,15 @@
 use chrono::Utc;
-use sqlx::PgPool;
 use sqlx::types::Json;
+use sqlx::PgPool;
+use tracing::debug;
 use uuid::Uuid;
 
-use crate::common::NanoId;
 use crate::common::types::RequestContext;
+use crate::common::NanoId;
 use crate::error::AppError;
-use crate::features::applications::models::{Application, CreateApplicationRequest, GetApplicationResponse};
+use crate::features::applications::models::{
+    Application, CreateApplicationRequest, GetApplicationResponse,
+};
 
 pub struct ApplicationRepository {
     pool: PgPool,
@@ -26,6 +29,7 @@ impl ApplicationRepository {
         let public_id = format!("app_{}", NanoId::new());
         let now = Utc::now();
 
+        debug!(public_id = %public_id, "inserting application");
         let application = sqlx::query_as::<_, Application>(
             r#"
             INSERT INTO applications (
@@ -60,7 +64,11 @@ impl ApplicationRepository {
         Ok(application)
     }
 
-    pub async fn get_by_id(&self, public_id: String) -> Result<Option<GetApplicationResponse>, AppError> {
+    pub async fn get_by_id(
+        &self,
+        public_id: String,
+    ) -> Result<Option<GetApplicationResponse>, AppError> {
+        debug!(public_id = %public_id, "querying application");
         let application = sqlx::query_as::<_, Application>(
             r#"
             SELECT id, public_id, organization_id, tenant_id,
@@ -77,7 +85,12 @@ impl ApplicationRepository {
         Ok(application.map(GetApplicationResponse::from))
     }
 
-    pub async fn delete_by_id(&self, public_id: String, ctx: RequestContext) -> Result<(), AppError> {
+    pub async fn delete_by_id(
+        &self,
+        public_id: String,
+        ctx: RequestContext,
+    ) -> Result<(), AppError> {
+        debug!(public_id = %public_id, "soft deleting application");
         sqlx::query(
             r#"
             UPDATE applications
@@ -98,7 +111,12 @@ impl ApplicationRepository {
         Ok(())
     }
 
-    pub async fn restore_by_id(&self, public_id: String, ctx: RequestContext) -> Result<Option<GetApplicationResponse>, AppError> {
+    pub async fn restore_by_id(
+        &self,
+        public_id: String,
+        ctx: RequestContext,
+    ) -> Result<Option<GetApplicationResponse>, AppError> {
+        debug!(public_id = %public_id, "restoring application");
         let application = sqlx::query_as::<_, Application>(
             r#"
             UPDATE applications

@@ -1,0 +1,288 @@
+use std::collections::HashMap;
+
+use chrono::{DateTime, Utc};
+use sqlx::{types::Json, PgPool};
+use uuid::Uuid;
+
+use crate::common::{nano_id::NanoId, types::RequestContext};
+use crate::error::AppError;
+use crate::features::events::models::{EventRow, ListQueryParams};
+
+const BASE_SELECT: &str = r#"
+    SELECT
+        ev.id,
+        ev.public_id,
+        ev.application_id,
+        a.public_id  AS application_public_id,
+        ev.event_type_id,
+        et.public_id AS event_type_public_id,
+        et.name      AS event_type_name,
+        ev.endpoint_id,
+        ep.public_id AS endpoint_public_id,
+        ev.tenant_id,
+        ev.organization_id,
+        ev.payload,
+        ev.idempotency_key,
+        ev.tags,
+        ev.request_id,
+        ev.created_by,
+        ev.created_at
+    FROM events ev
+    JOIN  applications a  ON a.id  = ev.application_id
+    JOIN  event_types  et ON et.id = ev.event_type_id
+    LEFT JOIN endpoints ep ON ep.id = ev.endpoint_id
+"#;
+
+#[derive(sqlx::FromRow, Debug)]
+pub struct ApplicationRef {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub organization_id: Uuid,
+}
+
+#[derive(sqlx::FromRow, Debug)]
+pub struct EventTypeRef {
+    pub id: Uuid,
+}
+
+#[derive(sqlx::FromRow, Debug)]
+pub struct EndpointRef {
+    pub id: Uuid,
+}
+
+pub struct EventRepository {
+    db: PgPool,
+}
+
+impl EventRepository {
+    pub fn new(db: PgPool) -> Self {
+        Self { db }
+    }
+
+    pub async fn get_application(
+        &self,
+        public_id: &str,
+    ) -> Result<Option<ApplicationRef>, AppError> {
+        sqlx::query_as::<_, ApplicationRef>(
+            "SELECT id, tenant_id, organization_id FROM applications \
+             WHERE public_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .fetch_optional(&self.db)
+        .await
+        .map_err(AppError::from)
+    }
+
+    /// Resolves an event type by public_id, scoped to the tenant.
+    /// Returns None if the type doesn't exist, is archived, or belongs to a different tenant.
+    pub async fn get_event_type(
+        &self,
+        public_id: &str,
+        tenant_id: Uuid,
+    ) -> Result<Option<EventTypeRef>, AppError> {
+        sqlx::query_as::<_, EventTypeRef>(
+            "SELECT id FROM event_types \
+             WHERE public_id = $1 AND tenant_id = $2 \
+               AND archived = FALSE AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .bind(tenant_id)
+        .fetch_optional(&self.db)
+        .await
+        .map_err(AppError::from)
+    }
+
+    /// Resolves an endpoint by public_id, confirming it belongs to the application and is active.
+    pub async fn get_endpoint_for_event(
+        &self,
+        public_id: &str,
+        application_id: Uuid,
+    ) -> Result<Option<EndpointRef>, AppError> {
+        sqlx::query_as::<_, EndpointRef>(
+            "SELECT id FROM endpoints \
+             WHERE public_id = $1 AND application_id = $2 \
+               AND status = 'active' AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .bind(application_id)
+        .fetch_optional(&self.db)
+        .await
+        .map_err(AppError::from)
+    }
+
+    /// Inserts an event with idempotency support.
+    ///
+    /// Returns `(row, true)` on a fresh insert, `(row, false)` when the
+    /// `idempotency_key` already exists for the application (existing row returned).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create(
+        &self,
+        app: ApplicationRef,
+        event_type_id: Uuid,
+        endpoint_id: Option<Uuid>,
+        payload: &serde_json::Value,
+        idempotency_key: Option<&str>,
+        tags: &HashMap<String, String>,
+        ctx: RequestContext,
+    ) -> Result<(EventRow, bool), AppError> {
+        let public_id = format!("evn_{}", NanoId::new());
+
+        let inserted_id: Option<Uuid> = sqlx::query_scalar(
+            r#"INSERT INTO events
+               (public_id, application_id, event_type_id, endpoint_id,
+                tenant_id, organization_id,
+                payload, idempotency_key, tags, request_id, created_by)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, $10, $11)
+               ON CONFLICT (application_id, idempotency_key)
+               WHERE idempotency_key IS NOT NULL
+               DO NOTHING
+               RETURNING id"#,
+        )
+        .bind(&public_id)
+        .bind(app.id)
+        .bind(event_type_id)
+        .bind(endpoint_id)
+        .bind(app.tenant_id)
+        .bind(app.organization_id)
+        .bind(Json(payload))
+        .bind(idempotency_key)
+        .bind(Json(tags))
+        .bind(ctx.request_id)
+        .bind(ctx.created_by)
+        .fetch_optional(&self.db)
+        .await?;
+
+        match inserted_id {
+            Some(_) => {
+                let row = self.get_by_id(&public_id).await?.ok_or_else(|| {
+                    AppError::Internal("event created but not found on fetch".into())
+                })?;
+                Ok((row, true))
+            }
+            None => {
+                // idempotency_key conflict — return the original event unchanged
+                let key = idempotency_key.expect("conflict implies idempotency_key is set");
+                let row = self
+                    .get_by_idempotency_key(app.id, key)
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::Internal("idempotency conflict but original row not found".into())
+                    })?;
+                Ok((row, false))
+            }
+        }
+    }
+
+    pub async fn get_by_id(&self, public_id: &str) -> Result<Option<EventRow>, AppError> {
+        let sql = format!("{} WHERE ev.public_id = $1", BASE_SELECT);
+        sqlx::query_as::<_, EventRow>(&sql)
+            .bind(public_id)
+            .fetch_optional(&self.db)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn get_by_idempotency_key(
+        &self,
+        application_id: Uuid,
+        idempotency_key: &str,
+    ) -> Result<Option<EventRow>, AppError> {
+        let sql = format!(
+            "{} WHERE ev.application_id = $1 AND ev.idempotency_key = $2",
+            BASE_SELECT
+        );
+        sqlx::query_as::<_, EventRow>(&sql)
+            .bind(application_id)
+            .bind(idempotency_key)
+            .fetch_optional(&self.db)
+            .await
+            .map_err(AppError::from)
+    }
+
+    pub async fn list(&self, filter: ListQueryParams) -> Result<(Vec<EventRow>, i64), AppError> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: Uuid,
+            public_id: String,
+            application_id: Uuid,
+            application_public_id: String,
+            event_type_id: Uuid,
+            event_type_public_id: String,
+            event_type_name: String,
+            endpoint_id: Option<Uuid>,
+            endpoint_public_id: Option<String>,
+            tenant_id: Uuid,
+            organization_id: Uuid,
+            payload: Json<serde_json::Value>,
+            idempotency_key: Option<String>,
+            tags: Json<HashMap<String, String>>,
+            request_id: Uuid,
+            created_by: Uuid,
+            created_at: DateTime<Utc>,
+            total_count: i64,
+        }
+
+        let limit = filter.limit.min(100) as i64;
+        let offset = (filter.page.saturating_sub(1)) as i64 * limit;
+
+        let rows = sqlx::query_as::<_, Row>(
+            r#"SELECT
+                ev.id, ev.public_id,
+                ev.application_id, a.public_id  AS application_public_id,
+                ev.event_type_id,  et.public_id AS event_type_public_id, et.name AS event_type_name,
+                ev.endpoint_id,    ep.public_id AS endpoint_public_id,
+                ev.tenant_id, ev.organization_id,
+                ev.payload, ev.idempotency_key, ev.tags,
+                ev.request_id, ev.created_by, ev.created_at,
+                COUNT(*) OVER() AS total_count
+               FROM events ev
+               JOIN  applications a  ON a.id  = ev.application_id
+               JOIN  event_types  et ON et.id = ev.event_type_id
+               LEFT JOIN endpoints ep ON ep.id = ev.endpoint_id
+               WHERE ev.application_id = (
+                   SELECT id FROM applications WHERE public_id = $1 AND deleted_at IS NULL
+               )
+                 AND ($2::text        IS NULL OR et.public_id = $2)
+                 AND ($3::text        IS NULL OR ep.public_id = $3)
+                 AND ($4::timestamptz IS NULL OR ev.created_at < $4)
+                 AND ($5::timestamptz IS NULL OR ev.created_at > $5)
+               ORDER BY ev.created_at DESC
+               LIMIT $6 OFFSET $7"#,
+        )
+        .bind(&filter.application_id)
+        .bind(&filter.event_type_id)
+        .bind(&filter.endpoint_id)
+        .bind(filter.before)
+        .bind(filter.after)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.db)
+        .await?;
+
+        let total = rows.first().map(|r| r.total_count).unwrap_or(0);
+        let items = rows
+            .into_iter()
+            .map(|r| EventRow {
+                id: r.id,
+                public_id: r.public_id,
+                application_id: r.application_id,
+                application_public_id: r.application_public_id,
+                event_type_id: r.event_type_id,
+                event_type_public_id: r.event_type_public_id,
+                event_type_name: r.event_type_name,
+                endpoint_id: r.endpoint_id,
+                endpoint_public_id: r.endpoint_public_id,
+                tenant_id: r.tenant_id,
+                organization_id: r.organization_id,
+                payload: r.payload,
+                idempotency_key: r.idempotency_key,
+                tags: r.tags,
+                request_id: r.request_id,
+                created_by: r.created_by,
+                created_at: r.created_at,
+            })
+            .collect();
+
+        Ok((items, total))
+    }
+}

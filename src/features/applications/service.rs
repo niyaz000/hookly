@@ -1,6 +1,10 @@
+use tracing::{info, warn};
+
 use crate::common::types::RequestContext;
 use crate::error::AppError;
-use crate::features::applications::models::{Application, CreateApplicationRequest, GetApplicationResponse};
+use crate::features::applications::models::{
+    Application, CreateApplicationRequest, GetApplicationResponse,
+};
 use crate::features::applications::repository::ApplicationRepository;
 
 pub struct ApplicationService {
@@ -12,29 +16,55 @@ impl ApplicationService {
         Self { repo }
     }
 
+    #[tracing::instrument(skip(self, req, ctx), fields(name = %req.name))]
     pub async fn create(
         &self,
         req: CreateApplicationRequest,
         ctx: RequestContext,
     ) -> Result<Application, AppError> {
-        self.repo.create(req, ctx).await
+        info!("creating application");
+        let application = self.repo.create(req, ctx).await?;
+        info!(public_id = %application.public_id, "application created");
+        Ok(application)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_by_id(&self, public_id: String) -> Result<GetApplicationResponse, AppError> {
+        info!("fetching application");
         self.repo
             .get_by_id(public_id.clone())
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("Application not found: {public_id}")))
+            .ok_or_else(|| {
+                warn!("application not found");
+                AppError::NotFound(format!("Application not found: {public_id}"))
+            })
     }
 
-    pub async fn delete_by_id(&self, public_id: String, ctx: RequestContext) -> Result<(), AppError> {
-        self.repo.delete_by_id(public_id, ctx).await
+    #[tracing::instrument(skip(self, ctx))]
+    pub async fn delete_by_id(
+        &self,
+        public_id: String,
+        ctx: RequestContext,
+    ) -> Result<(), AppError> {
+        info!("deleting application");
+        self.repo.delete_by_id(public_id, ctx).await?;
+        info!("application deleted");
+        Ok(())
     }
 
-    pub async fn restore_by_id(&self, public_id: String, ctx: RequestContext) -> Result<GetApplicationResponse, AppError> {
+    #[tracing::instrument(skip(self, ctx))]
+    pub async fn restore_by_id(
+        &self,
+        public_id: String,
+        ctx: RequestContext,
+    ) -> Result<GetApplicationResponse, AppError> {
+        info!("restoring application");
         self.repo
             .restore_by_id(public_id.clone(), ctx)
             .await?
-            .ok_or_else(|| AppError::NotFound(format!("Application not found: {public_id}")))
+            .ok_or_else(|| {
+                warn!("application not found for restore");
+                AppError::NotFound(format!("Application not found: {public_id}"))
+            })
     }
 }
