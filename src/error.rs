@@ -78,6 +78,9 @@ pub enum AppError {
     Validation(Vec<FieldError>),
     Conflict(String),
     Internal(String),
+    Unauthorized(String),
+    PayloadTooLarge,
+    UriTooLong,
 }
 
 impl IntoResponse for AppError {
@@ -113,6 +116,17 @@ impl IntoResponse for AppError {
                     ErrorBody::new("internal_error", "An internal error occurred"),
                 )
             }
+            AppError::Unauthorized(msg) => {
+                (StatusCode::UNAUTHORIZED, ErrorBody::new("unauthorized", msg))
+            }
+            AppError::PayloadTooLarge => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                ErrorBody::new("payload_too_large", "Request body exceeds the 256 KB limit"),
+            ),
+            AppError::UriTooLong => (
+                StatusCode::URI_TOO_LONG,
+                ErrorBody::new("uri_too_long", "Request URI exceeds the 512 character limit"),
+            ),
         };
 
         (status, Json(body)).into_response()

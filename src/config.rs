@@ -12,6 +12,8 @@ pub struct Config {
 pub struct CryptoConfig {
     /// Standard base64-encoded 32-byte master key. Generate with: openssl rand -base64 32
     pub master_key: String,
+    /// Standard base64-encoded 32-byte key for api key envelope encryption. Generate with: openssl rand -base64 32
+    pub api_key_encryption_key: String,
 }
 
 #[derive(Deserialize, Clone)]

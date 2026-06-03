@@ -1,4 +1,5 @@
 pub mod crypto;
+pub mod key_provider;
 pub mod validators;
 pub mod db;
 pub mod idempotency;
@@ -8,6 +9,7 @@ pub mod types;
 pub mod utils;
 
 pub use crypto::TenantCrypto;
+pub use key_provider::{EnvKeyProvider, KeyProvider};
 pub use nano_id::NanoId;
 pub use public_uuid::PublicUuid;
 pub use types::ValidatedJson;

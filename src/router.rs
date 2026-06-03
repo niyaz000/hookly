@@ -1,7 +1,8 @@
 use axum::{
     extract::Request,
+    http::header::CONTENT_LENGTH,
     middleware::{self, Next},
-    response::Response,
+    response::{IntoResponse, Response},
     routing::get,
     Router,
 };
@@ -10,8 +11,8 @@ use uuid::Uuid;
 
 use crate::error::{AppError, REQUEST_ID};
 use crate::features::{
-    applications, endpoints, event_types, events, invites, organizations, schedules, teams,
-    tenants, users,
+    api_keys, applications, endpoints, event_types, events, invites, organizations, schedules,
+    teams, tenants, users,
 };
 use crate::state::AppState;
 
@@ -20,6 +21,8 @@ pub fn create_router(state: AppState) -> Router {
         .nest("/api", api_routes(state))
         .fallback(not_found)
         .layer(TraceLayer::new_for_http())
+        .layer(middleware::from_fn(check_body_size))
+        .layer(middleware::from_fn(check_uri_length))
         .layer(middleware::from_fn(set_request_id))
 }
 
@@ -40,7 +43,30 @@ fn v1_routes(state: AppState) -> Router {
         .merge(applications::routes::routes(state.clone()))
         .merge(event_types::routes::routes(state.clone()))
         .merge(endpoints::routes::routes(state.clone()))
-        .merge(events::routes::routes(state))
+        .merge(events::routes::routes(state.clone()))
+        .merge(api_keys::routes::routes(state))
+}
+
+const MAX_URI_LEN: usize = 512;
+const MAX_BODY_BYTES: usize = 256 * 1024;
+
+async fn check_uri_length(req: Request, next: Next) -> Response {
+    let uri_len = req.uri().path_and_query().map_or(0, |pq| pq.as_str().len());
+    if uri_len > MAX_URI_LEN {
+        return AppError::UriTooLong.into_response();
+    }
+    next.run(req).await
+}
+
+async fn check_body_size(req: Request, next: Next) -> Response {
+    if let Some(cl) = req.headers().get(CONTENT_LENGTH) {
+        if let Some(len) = cl.to_str().ok().and_then(|s| s.parse::<usize>().ok()) {
+            if len > MAX_BODY_BYTES {
+                return AppError::PayloadTooLarge.into_response();
+            }
+        }
+    }
+    next.run(req).await
 }
 
 async fn set_request_id(req: Request, next: Next) -> Response {

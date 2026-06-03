@@ -54,7 +54,7 @@ impl OrganizationRepository {
         .bind(&public_id)
         .bind(&req.name)
         .bind(&req.slug)
-        .bind(req.billing_email.as_deref())
+        .bind(&req.billing_email)
         .bind(req.stripe_customer_id.as_deref())
         .bind(req.external_id.as_deref())
         .bind(Json(req.tags.unwrap_or_default()))

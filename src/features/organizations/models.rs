@@ -49,8 +49,10 @@ pub struct CreateOrganizationRequest {
     #[validate(length(max = 64, message = "slug must be 64 characters or fewer"))]
     #[validate(custom(function = "validate_slug", message = "slug must be lowercase alphanumeric and hyphens, not starting or ending with a hyphen"))]
     pub slug: String,
+    #[validate(custom(function = "validate_not_blank", message = "billing_email is required"))]
+    #[validate(email(message = "billing_email is not a valid email address"))]
     #[validate(length(max = 64, message = "billing_email must be 64 characters or fewer"))]
-    pub billing_email: Option<String>,
+    pub billing_email: String,
     #[validate(length(max = 32, message = "stripe_customer_id must be 32 characters or fewer"))]
     pub stripe_customer_id: Option<String>,
     #[validate(length(max = 64, message = "external_id must be 64 characters or fewer"))]
@@ -75,6 +77,7 @@ pub struct UpdateOrganizationRequest {
     #[validate(length(max = 64, message = "slug must be 64 characters or fewer"))]
     #[validate(custom(function = "validate_slug", message = "slug must be lowercase alphanumeric and hyphens, not starting or ending with a hyphen"))]
     pub slug: Option<String>,
+    #[validate(email(message = "billing_email is not a valid email address"))]
     #[validate(length(max = 64, message = "billing_email must be 64 characters or fewer"))]
     pub billing_email: Option<String>,
     #[validate(length(max = 32, message = "stripe_customer_id must be 32 characters or fewer"))]
@@ -103,8 +106,6 @@ pub struct OrganizationResponse {
     pub stripe_customer_id: Option<String>,
     pub external_id: Option<String>,
     pub tags: HashMap<String, String>,
-    pub metadata: HashMap<String, String>,
-    pub settings: HashMap<String, String>,
     pub created_by: Uuid,
     pub updated_by: Uuid,
     pub created_at: DateTime<Utc>,
@@ -123,8 +124,6 @@ impl From<Organization> for OrganizationResponse {
             stripe_customer_id: org.stripe_customer_id,
             external_id: org.external_id,
             tags: org.tags.0,
-            metadata: org.metadata.0,
-            settings: org.settings.0,
             created_by: org.created_by,
             updated_by: org.updated_by,
             created_at: org.created_at,

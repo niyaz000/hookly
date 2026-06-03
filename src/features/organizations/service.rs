@@ -28,7 +28,7 @@ impl OrganizationService {
         ctx: RequestContext,
     ) -> Result<OrganizationResponse, AppError> {
         req.validate()?;
-        info!("creating organization");
+        info!("creating organization with name and slug");
         let org = self.repo.create(req, ctx).await?;
         info!(public_id = %org.public_id, "organization created");
         Ok(OrganizationResponse::from(org))
