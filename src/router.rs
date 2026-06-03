@@ -9,6 +9,7 @@ use axum::{
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
+use crate::common::access_log;
 use crate::error::{AppError, REQUEST_ID};
 use crate::features::{
     api_keys, applications, endpoints, event_types, events, invites, organizations, schedules,
@@ -45,6 +46,7 @@ fn v1_routes(state: AppState) -> Router {
         .merge(endpoints::routes::routes(state.clone()))
         .merge(events::routes::routes(state.clone()))
         .merge(api_keys::routes::routes(state))
+        .route_layer(middleware::from_fn(access_log::access_log))
 }
 
 const MAX_URI_LEN: usize = 512;
