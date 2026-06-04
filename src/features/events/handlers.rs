@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -7,8 +7,9 @@ use axum::{
 use crate::{
     common::{
         idempotency,
+        qs_query::QsQuery,
         types::{PaginatedResponse, RequestContext},
-        PublicUuid, ValidatedJson,
+        ValidatedJson,
     },
     error::AppError,
     features::{
@@ -22,13 +23,6 @@ use crate::{
     state::AppState,
 };
 
-fn make_ctx() -> RequestContext {
-    RequestContext {
-        request_id: PublicUuid::new_v7().into_inner(),
-        created_by: PublicUuid::new_v7().into_inner(),
-    }
-}
-
 fn svc(state: AppState) -> EventService {
     EventService::new(
         EventRepository::new(state.db.clone()),
@@ -39,6 +33,7 @@ fn svc(state: AppState) -> EventService {
 
 pub async fn create_event(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateEventRequest>,
 ) -> Result<(StatusCode, Json<EventResponse>), AppError> {
@@ -51,7 +46,7 @@ pub async fn create_event(
             &key,
             &hash,
             move || async move {
-                let (ev, _) = svc(state).create(payload, make_ctx()).await?;
+                let (ev, _) = svc(state).create(payload, ctx).await?;
                 Ok(ev)
             },
         )
@@ -59,14 +54,14 @@ pub async fn create_event(
         return Ok((StatusCode::CREATED, Json(ev)));
     }
 
-    let (ev, created) = svc(state).create(payload, make_ctx()).await?;
+    let (ev, created) = svc(state).create(payload, ctx).await?;
     let status = if created { StatusCode::CREATED } else { StatusCode::OK };
     Ok((status, Json(ev)))
 }
 
 pub async fn list_events(
     State(state): State<AppState>,
-    Query(params): Query<ListQueryParams>,
+    QsQuery(params): QsQuery<ListQueryParams>,
 ) -> Result<(StatusCode, Json<PaginatedResponse<EventResponse>>), AppError> {
     let result = svc(state).list(params).await?;
     Ok((StatusCode::OK, Json(result)))

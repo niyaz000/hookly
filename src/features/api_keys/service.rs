@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 use crate::common::{types::RequestContext, KeyProvider};
 use crate::error::AppError;
+use crate::features::environments::repository::EnvironmentRepository;
 
 use super::crypto;
 use super::models::{
@@ -17,18 +18,19 @@ use super::repository::ApiKeyRepository;
 
 pub struct ApiKeyService {
     repo: ApiKeyRepository,
+    env_repo: EnvironmentRepository,
     key_provider: Arc<dyn KeyProvider>,
 }
 
 impl ApiKeyService {
-    pub fn new(repo: ApiKeyRepository, key_provider: Arc<dyn KeyProvider>) -> Self {
-        Self { repo, key_provider }
+    pub fn new(repo: ApiKeyRepository, env_repo: EnvironmentRepository, key_provider: Arc<dyn KeyProvider>) -> Self {
+        Self { repo, env_repo, key_provider }
     }
 
     #[tracing::instrument(skip(self, req, ctx), fields(
         tenant_id = %req.tenant_id,
         user_id = %req.user_id,
-        environment = %req.environment.as_str(),
+        environment_id = %req.environment_id,
         name = %req.name
     ))]
     pub async fn create(
@@ -37,6 +39,22 @@ impl ApiKeyService {
         ctx: RequestContext,
     ) -> Result<(ApiKey, String), AppError> {
         info!("creating api key");
+
+        let env = self
+            .env_repo
+            .get_by_public_id(&req.environment_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::BadRequest(format!("environment not found: {}", req.environment_id))
+            })?;
+
+        if env.tenant_id != req.tenant_id {
+            return Err(AppError::BadRequest("environment does not belong to this tenant".into()));
+        }
+
+        if env.status != crate::features::environments::models::EnvironmentStatus::Active {
+            return Err(AppError::BadRequest("environment is not active".into()));
+        }
 
         let settings = self
             .repo
@@ -72,7 +90,7 @@ impl ApiKeyService {
             default_ttl.map(|ttl| Utc::now() + chrono::Duration::seconds(ttl as i64))
         });
 
-        let (full_key, key_prefix) = crypto::generate_api_key(req.environment.as_str(), key_length);
+        let (full_key, key_prefix) = crypto::generate_api_key(&env.name, key_length);
         let key_hash = crypto::hash_key(&full_key);
 
         let key_encrypted = if allow_view_later {
@@ -93,7 +111,7 @@ impl ApiKeyService {
                 key_hash,
                 key_encrypted,
                 key_prefix,
-                req.environment,
+                req.environment_id,
                 expires_at,
                 ctx,
             )
@@ -143,15 +161,20 @@ impl ApiKeyService {
         let limit = query.limit.unwrap_or(20).clamp(1, 100);
         info!(tenant_id = %tenant_id, limit = limit, "listing api keys");
 
+        let tags_val = query.tags.as_ref()
+            .filter(|t| !t.is_empty())
+            .map(|t| serde_json::to_value(t).unwrap_or(serde_json::Value::Null));
+
         let (keys, next_cursor_id) = self
             .repo
             .list(
                 tenant_id,
                 query.user_id,
-                query.environment,
+                query.environment_id,
                 query.status,
                 limit,
                 query.cursor,
+                tags_val,
             )
             .await?;
 

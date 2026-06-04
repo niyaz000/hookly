@@ -1,12 +1,13 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, State},
     http::StatusCode,
     Json,
 };
 
 use crate::{
-    common::{types::RequestContext, PublicUuid, ValidatedJson},
+    common::{types::RequestContext, qs_query::QsQuery, ValidatedJson},
     error::AppError,
+    features::environments::repository::EnvironmentRepository,
     state::AppState,
 };
 
@@ -20,25 +21,24 @@ use super::{
     service::ApiKeyService,
 };
 
-fn make_ctx() -> RequestContext {
-    RequestContext {
-        request_id: PublicUuid::new_v7().into_inner(),
-        created_by: PublicUuid::new_v7().into_inner(),
-    }
-}
-
 fn make_svc(state: AppState) -> ApiKeyService {
-    ApiKeyService::new(ApiKeyRepository::new(state.db), state.key_provider)
+    ApiKeyService::new(
+        ApiKeyRepository::new(state.db.clone()),
+        EnvironmentRepository::new(state.db),
+        state.key_provider,
+    )
 }
 
 pub async fn create_api_key(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     ValidatedJson(payload): ValidatedJson<CreateApiKeyRequest>,
 ) -> Result<(StatusCode, Json<ApiKeyResponse>), AppError> {
+    let payload = payload.normalize();
     payload.validate_all()?;
 
     let svc = make_svc(state);
-    let (key, plaintext) = svc.create(payload, make_ctx()).await?;
+    let (key, plaintext) = svc.create(payload, ctx).await?;
 
     let mut resp = ApiKeyResponse::from(key);
     resp.key = Some(plaintext);
@@ -48,7 +48,7 @@ pub async fn create_api_key(
 
 pub async fn list_api_keys(
     State(state): State<AppState>,
-    Query(query): Query<ListApiKeysQuery>,
+    QsQuery(query): QsQuery<ListApiKeysQuery>,
 ) -> Result<(StatusCode, Json<ListApiKeysResponse>), AppError> {
     let tenant_id = query
         .tenant_id
@@ -72,45 +72,50 @@ pub async fn get_api_key(
 
 pub async fn update_api_key(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
     ValidatedJson(payload): ValidatedJson<UpdateApiKeyRequest>,
 ) -> Result<(StatusCode, Json<ApiKeyResponse>), AppError> {
+    let payload = payload.normalize();
     payload.validate_all()?;
 
     let svc = make_svc(state);
-    let key = svc.update(&public_id, payload, make_ctx()).await?;
+    let key = svc.update(&public_id, payload, ctx).await?;
 
     Ok((StatusCode::OK, Json(ApiKeyResponse::from(key))))
 }
 
 pub async fn delete_api_key(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
     let svc = make_svc(state);
-    svc.delete(&public_id, make_ctx()).await?;
+    svc.delete(&public_id, ctx).await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn reveal_api_key(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<(StatusCode, Json<RevealApiKeyResponse>), AppError> {
     let svc = make_svc(state);
-    let resp = svc.reveal(&public_id, make_ctx()).await?;
+    let resp = svc.reveal(&public_id, ctx).await?;
 
     Ok((StatusCode::OK, Json(resp)))
 }
 
 pub async fn upsert_api_key_settings(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     ValidatedJson(payload): ValidatedJson<UpsertApiKeySettingsRequest>,
 ) -> Result<(StatusCode, Json<ApiKeySettingsResponse>), AppError> {
     payload.validate_all()?;
 
     let svc = make_svc(state);
-    let settings = svc.upsert_settings(payload, make_ctx()).await?;
+    let settings = svc.upsert_settings(payload, ctx).await?;
 
     Ok((StatusCode::CREATED, Json(ApiKeySettingsResponse::from(settings))))
 }
@@ -127,13 +132,14 @@ pub async fn get_api_key_settings(
 
 pub async fn update_api_key_settings(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
     ValidatedJson(payload): ValidatedJson<UpdateApiKeySettingsRequest>,
 ) -> Result<(StatusCode, Json<ApiKeySettingsResponse>), AppError> {
     payload.validate_all()?;
 
     let svc = make_svc(state);
-    let settings = svc.update_settings(&public_id, payload, make_ctx()).await?;
+    let settings = svc.update_settings(&public_id, payload, ctx).await?;
 
     Ok((StatusCode::OK, Json(ApiKeySettingsResponse::from(settings))))
 }

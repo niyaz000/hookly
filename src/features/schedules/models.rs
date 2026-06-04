@@ -107,6 +107,7 @@ pub struct ListSchedulesQuery {
     pub organization_id: Option<Uuid>,
     pub tenant_id: Option<Uuid>,
     pub status: Option<String>,
+    pub tags: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize)]

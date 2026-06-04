@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -7,27 +9,6 @@ use crate::error::{AppError, FieldError};
 use crate::common::validators::validate_not_blank;
 
 // ── Postgres enum types ──────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "api_key_environment", rename_all = "lowercase")]
-#[serde(rename_all = "lowercase")]
-pub enum ApiKeyEnvironment {
-    Live,
-    Test,
-    Dev,
-    Sandbox,
-}
-
-impl ApiKeyEnvironment {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Live => "live",
-            Self::Test => "test",
-            Self::Dev => "dev",
-            Self::Sandbox => "sandbox",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "api_key_status", rename_all = "lowercase")]
@@ -51,7 +32,7 @@ pub struct ApiKey {
     pub key_hash: String,
     pub key_encrypted: Option<String>,
     pub key_prefix: String,
-    pub environment: ApiKeyEnvironment,
+    pub environment_id: String,
     pub status: ApiKeyStatus,
     pub expires_at: Option<DateTime<Utc>>,
     pub last_used_at: Option<DateTime<Utc>>,
@@ -92,11 +73,20 @@ pub struct CreateApiKeyRequest {
     pub name: String,
     #[validate(length(max = 521, message = "description must be 521 characters or fewer"))]
     pub description: Option<String>,
-    pub environment: ApiKeyEnvironment,
+    #[validate(custom(function = "validate_not_blank", message = "environment_id is required"))]
+    pub environment_id: String,
     pub expires_at: Option<DateTime<Utc>>,
 }
 
 impl CreateApiKeyRequest {
+    pub fn normalize(mut self) -> Self {
+        self.name = self.name.trim().to_owned();
+        self.description = self.description
+            .map(|d| d.trim().to_owned())
+            .filter(|d| !d.is_empty());
+        self
+    }
+
     pub fn validate_all(&self) -> Result<(), AppError> {
         Validate::validate(self).map_err(AppError::from)?;
         if let Some(expires_at) = self.expires_at {
@@ -119,6 +109,13 @@ pub struct UpdateApiKeyRequest {
 }
 
 impl UpdateApiKeyRequest {
+    pub fn normalize(mut self) -> Self {
+        self.description = self.description
+            .map(|d| d.trim().to_owned())
+            .filter(|d| !d.is_empty());
+        self
+    }
+
     pub fn validate_all(&self) -> Result<(), AppError> {
         if self.description.is_none() && self.expires_at.is_none() {
             return Err(AppError::BadRequest(
@@ -233,10 +230,11 @@ impl UpdateApiKeySettingsRequest {
 pub struct ListApiKeysQuery {
     pub tenant_id: Option<Uuid>,
     pub user_id: Option<Uuid>,
-    pub environment: Option<ApiKeyEnvironment>,
+    pub environment_id: Option<String>,
     pub status: Option<ApiKeyStatus>,
     pub limit: Option<i64>,
     pub cursor: Option<Uuid>,
+    pub tags: Option<HashMap<String, String>>,
 }
 
 // ── Audit helpers ────────────────────────────────────────────────────────────
@@ -264,16 +262,15 @@ pub struct ApiKeyResponse {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub environment: ApiKeyEnvironment,
+    pub environment_id: String,
     pub status: ApiKeyStatus,
-    /// Display hint: `hkly_<env>_<3-char prefix>...`
+    /// Display hint: `key_<env-prefix>_***`
     pub key_hint: String,
     /// Plaintext key — present only in the creation response, absent on all other reads.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
     pub expires_at: Option<DateTime<Utc>>,
     pub last_used_at: Option<DateTime<Utc>>,
-    pub version: i32,
     pub created_by: Uuid,
     pub updated_by: Uuid,
     pub created_at: DateTime<Utc>,
@@ -282,7 +279,7 @@ pub struct ApiKeyResponse {
 
 impl From<ApiKey> for ApiKeyResponse {
     fn from(k: ApiKey) -> Self {
-        let key_hint = format!("hkly_{}_{}...", k.environment.as_str(), k.key_prefix);
+        let key_hint = format!("key_{}_***", k.key_prefix);
         Self {
             id: k.public_id,
             organization_id: k.organization_id,
@@ -290,13 +287,12 @@ impl From<ApiKey> for ApiKeyResponse {
             user_id: k.user_id,
             name: k.name,
             description: k.description,
-            environment: k.environment,
+            environment_id: k.environment_id,
             status: k.status,
             key_hint,
             key: None,
             expires_at: k.expires_at,
             last_used_at: k.last_used_at,
-            version: k.version,
             created_by: k.created_by,
             updated_by: k.updated_by,
             created_at: k.created_at,
@@ -327,7 +323,6 @@ pub struct ApiKeySettingsResponse {
     pub key_length: i16,
     pub default_ttl_seconds: Option<i32>,
     pub allow_view_later: bool,
-    pub version: i32,
     pub created_by: Uuid,
     pub updated_by: Uuid,
     pub created_at: DateTime<Utc>,
@@ -344,7 +339,6 @@ impl From<ApiKeySettings> for ApiKeySettingsResponse {
             key_length: s.key_length,
             default_ttl_seconds: s.default_ttl_seconds,
             allow_view_later: s.allow_view_later,
-            version: s.version,
             created_by: s.created_by,
             updated_by: s.updated_by,
             created_at: s.created_at,

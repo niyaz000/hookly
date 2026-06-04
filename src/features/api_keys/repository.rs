@@ -7,14 +7,14 @@ use crate::common::{types::RequestContext, NanoId};
 use crate::error::AppError;
 
 use super::models::{
-    ApiKey, ApiKeyEnvironment, ApiKeySettings, ApiKeyStatus, InsertAuditParams,
+    ApiKey, ApiKeySettings, ApiKeyStatus, InsertAuditParams,
     UpdateApiKeySettingsRequest, UpsertApiKeySettingsRequest,
 };
 
 const SELECT_API_KEY_COLS: &str = "
     id, public_id, organization_id, tenant_id, user_id,
     name, description, key_hash, key_encrypted, key_prefix,
-    environment, status, expires_at, last_used_at,
+    environment_id, status, expires_at, last_used_at,
     version, created_by, updated_by, created_at, updated_at, deleted_at
 ";
 
@@ -43,7 +43,7 @@ impl ApiKeyRepository {
         key_hash: String,
         key_encrypted: Option<String>,
         key_prefix: String,
-        environment: ApiKeyEnvironment,
+        environment_id: String,
         expires_at: Option<DateTime<Utc>>,
         ctx: RequestContext,
     ) -> Result<ApiKey, AppError> {
@@ -54,7 +54,7 @@ impl ApiKeyRepository {
             public_id = %public_id,
             tenant_id = %tenant_id,
             user_id = %user_id,
-            environment = %environment.as_str(),
+            environment_id = %environment_id,
             "inserting api key"
         );
 
@@ -63,7 +63,7 @@ impl ApiKeyRepository {
             INSERT INTO api_keys (
                 id, public_id, organization_id, tenant_id, user_id,
                 name, description, key_hash, key_encrypted, key_prefix,
-                environment, expires_at,
+                environment_id, expires_at,
                 request_id, version, created_by, updated_by, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5,
@@ -84,7 +84,7 @@ impl ApiKeyRepository {
         .bind(&key_hash)
         .bind(&key_encrypted)
         .bind(&key_prefix)
-        .bind(environment)
+        .bind(&environment_id)
         .bind(expires_at)
         .bind(ctx.request_id)
         .bind(ctx.created_by)
@@ -124,10 +124,11 @@ impl ApiKeyRepository {
         &self,
         tenant_id: Uuid,
         user_id: Option<Uuid>,
-        environment: Option<ApiKeyEnvironment>,
+        environment_id: Option<String>,
         status: Option<ApiKeyStatus>,
         limit: i64,
         cursor: Option<Uuid>,
+        tags: Option<serde_json::Value>,
     ) -> Result<(Vec<ApiKey>, Option<Uuid>), AppError> {
         debug!(
             tenant_id = %tenant_id,
@@ -145,11 +146,14 @@ impl ApiKeyRepository {
         if let Some(uid) = user_id {
             qb.push(" AND user_id = ").push_bind(uid);
         }
-        if let Some(env) = environment {
-            qb.push(" AND environment = ").push_bind(env);
+        if let Some(env_id) = environment_id {
+            qb.push(" AND environment_id = ").push_bind(env_id);
         }
         if let Some(st) = status {
             qb.push(" AND status = ").push_bind(st);
+        }
+        if let Some(tags_val) = tags {
+            qb.push(" AND tags @> ").push_bind(tags_val);
         }
         if let Some(cursor_id) = cursor {
             qb.push(" AND id > ").push_bind(cursor_id);

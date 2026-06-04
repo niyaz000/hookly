@@ -9,11 +9,11 @@ use axum::{
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
-use crate::common::access_log;
+use crate::common::{access_log, types::RequestContext};
 use crate::error::{AppError, REQUEST_ID};
 use crate::features::{
-    api_keys, applications, endpoints, event_types, events, invites, organizations, schedules,
-    teams, tenants, users,
+    api_keys, applications, endpoints, environments, event_types, events, invites, organizations,
+    schedules, teams, tenants, users,
 };
 use crate::state::AppState;
 
@@ -45,7 +45,9 @@ fn v1_routes(state: AppState) -> Router {
         .merge(event_types::routes::routes(state.clone()))
         .merge(endpoints::routes::routes(state.clone()))
         .merge(events::routes::routes(state.clone()))
-        .merge(api_keys::routes::routes(state))
+        .merge(api_keys::routes::routes(state.clone()))
+        .merge(environments::routes::routes(state))
+        .route_layer(middleware::from_fn(inject_request_context))
         .route_layer(middleware::from_fn(access_log::access_log))
 }
 
@@ -74,6 +76,15 @@ async fn check_body_size(req: Request, next: Next) -> Response {
 async fn set_request_id(req: Request, next: Next) -> Response {
     let id = Uuid::now_v7();
     REQUEST_ID.scope(id, next.run(req)).await
+}
+
+async fn inject_request_context(mut req: Request, next: Next) -> Response {
+    let request_id = REQUEST_ID
+        .try_with(|id| *id)
+        .unwrap_or_else(|_| Uuid::now_v7());
+    let created_by = Uuid::now_v7();
+    req.extensions_mut().insert(RequestContext { request_id, created_by });
+    next.run(req).await
 }
 
 async fn health_check() -> &'static str {

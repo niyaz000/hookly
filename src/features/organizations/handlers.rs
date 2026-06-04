@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -7,8 +7,9 @@ use axum::{
 use crate::{
     common::{
         idempotency,
+        qs_query::QsQuery,
         types::RequestContext,
-        PublicUuid, ValidatedJson,
+        ValidatedJson,
     },
     error::AppError,
     features::organizations::{
@@ -22,19 +23,13 @@ use crate::{
     state::AppState,
 };
 
-fn make_ctx() -> RequestContext {
-    RequestContext {
-        request_id: PublicUuid::new_v7().into_inner(),
-        created_by: PublicUuid::new_v7().into_inner(),
-    }
-}
-
 fn service(state: AppState) -> OrganizationService {
     OrganizationService::new(OrganizationRepository::new(state.db))
 }
 
 pub async fn create_organization(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateOrganizationRequest>,
 ) -> Result<(StatusCode, Json<OrganizationResponse>), AppError> {
@@ -46,13 +41,13 @@ pub async fn create_organization(
             "organizations",
             &key,
             &hash,
-            move || async move { service(state).create(payload, make_ctx()).await },
+            move || async move { service(state).create(payload, ctx).await },
         )
         .await?;
         return Ok((StatusCode::CREATED, Json(org)));
     }
 
-    let org = service(state).create(payload, make_ctx()).await?;
+    let org = service(state).create(payload, ctx).await?;
     Ok((StatusCode::CREATED, Json(org)))
 }
 
@@ -66,40 +61,44 @@ pub async fn get_organization(
 
 pub async fn update_organization(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
     ValidatedJson(payload): ValidatedJson<UpdateOrganizationRequest>,
 ) -> Result<Json<OrganizationResponse>, AppError> {
-    let org = service(state).update(public_id, payload, make_ctx()).await?;
+    let org = service(state).update(public_id, payload, ctx).await?;
     Ok(Json(org))
 }
 
 pub async fn delete_organization(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
-    service(state).delete(public_id, make_ctx()).await?;
+    service(state).delete(public_id, ctx).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn suspend_organization(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<OrganizationResponse>, AppError> {
-    let org = service(state).suspend(public_id, make_ctx()).await?;
+    let org = service(state).suspend(public_id, ctx).await?;
     Ok(Json(org))
 }
 
 pub async fn restore_organization(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<OrganizationResponse>, AppError> {
-    let org = service(state).restore(public_id, make_ctx()).await?;
+    let org = service(state).restore(public_id, ctx).await?;
     Ok(Json(org))
 }
 
 pub async fn list_organizations(
     State(state): State<AppState>,
-    Query(query): Query<ListOrganizationsQuery>,
+    QsQuery(query): QsQuery<ListOrganizationsQuery>,
 ) -> Result<Json<ListOrganizationsResponse>, AppError> {
     let result = service(state).list(query).await?;
     Ok(Json(result))

@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -7,8 +7,9 @@ use axum::{
 use crate::{
     common::{
         idempotency,
+        qs_query::QsQuery,
         types::RequestContext,
-        PublicUuid, ValidatedJson,
+        ValidatedJson,
     },
     error::AppError,
     features::tenants::{
@@ -22,19 +23,13 @@ use crate::{
     state::AppState,
 };
 
-fn make_ctx() -> RequestContext {
-    RequestContext {
-        request_id: PublicUuid::new_v7().into_inner(),
-        created_by: PublicUuid::new_v7().into_inner(),
-    }
-}
-
 fn service(state: AppState) -> TenantService {
     TenantService::new(TenantRepository::new(state.db))
 }
 
 pub async fn create_tenant(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateTenantRequest>,
 ) -> Result<(StatusCode, Json<TenantResponse>), AppError> {
@@ -46,13 +41,13 @@ pub async fn create_tenant(
             "tenants",
             &key,
             &hash,
-            move || async move { service(state).create(payload, make_ctx()).await },
+            move || async move { service(state).create(payload, ctx).await },
         )
         .await?;
         return Ok((StatusCode::CREATED, Json(tenant)));
     }
 
-    let tenant = service(state).create(payload, make_ctx()).await?;
+    let tenant = service(state).create(payload, ctx).await?;
     Ok((StatusCode::CREATED, Json(tenant)))
 }
 
@@ -66,40 +61,44 @@ pub async fn get_tenant(
 
 pub async fn update_tenant(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
     ValidatedJson(payload): ValidatedJson<UpdateTenantRequest>,
 ) -> Result<Json<TenantResponse>, AppError> {
-    let tenant = service(state).update(public_id, payload, make_ctx()).await?;
+    let tenant = service(state).update(public_id, payload, ctx).await?;
     Ok(Json(tenant))
 }
 
 pub async fn delete_tenant(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
-    service(state).delete(public_id, make_ctx()).await?;
+    service(state).delete(public_id, ctx).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn suspend_tenant(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<TenantResponse>, AppError> {
-    let tenant = service(state).suspend(public_id, make_ctx()).await?;
+    let tenant = service(state).suspend(public_id, ctx).await?;
     Ok(Json(tenant))
 }
 
 pub async fn reactivate_tenant(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<TenantResponse>, AppError> {
-    let tenant = service(state).reactivate(public_id, make_ctx()).await?;
+    let tenant = service(state).reactivate(public_id, ctx).await?;
     Ok(Json(tenant))
 }
 
 pub async fn list_tenants(
     State(state): State<AppState>,
-    Query(query): Query<ListTenantsQuery>,
+    QsQuery(query): QsQuery<ListTenantsQuery>,
 ) -> Result<Json<ListTenantsResponse>, AppError> {
     let result = service(state).list(query).await?;
     Ok(Json(result))

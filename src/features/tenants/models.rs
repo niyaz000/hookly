@@ -113,6 +113,7 @@ pub struct ListTenantsQuery {
     pub cursor: Option<String>,
     pub status: Option<TenantStatus>,
     pub organization_id: Option<Uuid>,
+    pub tags: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Serialize)]

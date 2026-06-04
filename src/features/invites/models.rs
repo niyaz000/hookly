@@ -95,6 +95,7 @@ pub struct ListInvitesQuery {
     pub organization_id: Option<Uuid>,
     pub status: Option<String>,
     pub user_email: Option<String>,
+    pub tags: Option<serde_json::Value>,
 }
 
 // --- Response types ---

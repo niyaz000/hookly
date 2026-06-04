@@ -53,6 +53,7 @@ pub struct ListQueryParams {
     pub endpoint_id: Option<String>,
     pub before: Option<DateTime<Utc>>,
     pub after: Option<DateTime<Utc>>,
+    pub tags: Option<HashMap<String, String>>,
 }
 
 fn default_page() -> u32 {

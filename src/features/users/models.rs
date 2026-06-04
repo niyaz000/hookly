@@ -145,6 +145,7 @@ pub struct ListUsersQuery {
     pub status: Option<UserStatus>,
     pub organization_id: Option<Uuid>,
     pub tenant_id: Option<Uuid>,
+    pub tags: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Serialize)]

@@ -121,6 +121,7 @@ pub struct ListQueryParams {
     pub page: i64,
     #[serde(default = "default_limit")]
     pub limit: i64,
+    pub tags: Option<HashMap<String, String>>,
 }
 
 fn default_page() -> i64 {

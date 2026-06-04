@@ -137,6 +137,7 @@ pub struct ListOrganizationsQuery {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
     pub status: Option<OrganizationStatus>,
+    pub tags: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Serialize)]

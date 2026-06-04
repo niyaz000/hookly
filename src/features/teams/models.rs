@@ -168,6 +168,7 @@ pub struct ListTeamsQuery {
     pub cursor: Option<String>,
     pub organization_id: Option<Uuid>,
     pub tenant_id: Option<Uuid>,
+    pub tags: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Serialize)]

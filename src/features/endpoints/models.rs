@@ -122,6 +122,7 @@ pub struct ListQueryParams {
     pub limit: u32,
     pub status: Option<String>,
     pub endpoint_type: Option<String>,
+    pub tags: Option<HashMap<String, String>>,
 }
 
 fn default_page() -> u32 {

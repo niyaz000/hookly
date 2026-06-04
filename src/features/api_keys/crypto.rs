@@ -8,14 +8,14 @@ use sha2::{Digest, Sha256};
 use crate::common::NanoId;
 use crate::error::AppError;
 
-/// Generates a new API key and its 3-char display prefix.
+/// Generates a new API key and the 3-char environment prefix stored as `key_prefix`.
 /// Returns `(full_key, key_prefix)`.
 ///
-/// Format: `hkly_<env>_<base62_random>`
-pub fn generate_api_key(env_str: &str, key_length: i16) -> (String, String) {
+/// Format: `key_<first-3-of-env-name>_<random>`
+pub fn generate_api_key(env_name: &str, key_length: i16) -> (String, String) {
     let random_part = NanoId::generate(key_length as usize);
-    let key_prefix: String = random_part.chars().take(3).collect();
-    let full_key = format!("hkly_{}_{}", env_str, random_part);
+    let key_prefix: String = env_name.chars().take(3).collect();
+    let full_key = format!("key_{}_{}", key_prefix, random_part);
     (full_key, key_prefix)
 }
 

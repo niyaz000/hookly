@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -7,8 +7,9 @@ use axum::{
 use crate::{
     common::{
         idempotency,
+        qs_query::QsQuery,
         types::RequestContext,
-        PublicUuid, ValidatedJson,
+        ValidatedJson,
     },
     error::AppError,
     features::teams::{
@@ -22,19 +23,13 @@ use crate::{
     state::AppState,
 };
 
-fn make_ctx() -> RequestContext {
-    RequestContext {
-        request_id: PublicUuid::new_v7().into_inner(),
-        created_by: PublicUuid::new_v7().into_inner(),
-    }
-}
-
 fn service(state: AppState) -> TeamService {
     TeamService::new(TeamRepository::new(state.db))
 }
 
 pub async fn create_team(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateTeamRequest>,
 ) -> Result<(StatusCode, Json<TeamResponse>), AppError> {
@@ -46,13 +41,13 @@ pub async fn create_team(
             "teams",
             &key,
             &hash,
-            move || async move { service(state).create(payload, make_ctx()).await },
+            move || async move { service(state).create(payload, ctx).await },
         )
         .await?;
         return Ok((StatusCode::CREATED, Json(team)));
     }
 
-    let team = service(state).create(payload, make_ctx()).await?;
+    let team = service(state).create(payload, ctx).await?;
     Ok((StatusCode::CREATED, Json(team)))
 }
 
@@ -66,32 +61,35 @@ pub async fn get_team(
 
 pub async fn update_team(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
     ValidatedJson(payload): ValidatedJson<UpdateTeamRequest>,
 ) -> Result<Json<TeamResponse>, AppError> {
-    let team = service(state).update(public_id, payload, make_ctx()).await?;
+    let team = service(state).update(public_id, payload, ctx).await?;
     Ok(Json(team))
 }
 
 pub async fn delete_team(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
-    service(state).delete(public_id, make_ctx()).await?;
+    service(state).delete(public_id, ctx).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn restore_team(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<TeamResponse>, AppError> {
-    let team = service(state).restore(public_id, make_ctx()).await?;
+    let team = service(state).restore(public_id, ctx).await?;
     Ok(Json(team))
 }
 
 pub async fn list_teams(
     State(state): State<AppState>,
-    Query(query): Query<ListTeamsQuery>,
+    QsQuery(query): QsQuery<ListTeamsQuery>,
 ) -> Result<Json<ListTeamsResponse>, AppError> {
     let result = service(state).list(query).await?;
     Ok(Json(result))
@@ -99,6 +97,7 @@ pub async fn list_teams(
 
 pub async fn add_team_members(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
     headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<AddTeamMembersRequest>,
@@ -113,23 +112,24 @@ pub async fn add_team_members(
             &key,
             &hash,
             move || async move {
-                service(state).add_members(public_id, payload, make_ctx()).await
+                service(state).add_members(public_id, payload, ctx).await
             },
         )
         .await?;
         return Ok(Json(members));
     }
 
-    let members = service(state).add_members(public_id, payload, make_ctx()).await?;
+    let members = service(state).add_members(public_id, payload, ctx).await?;
     Ok(Json(members))
 }
 
 pub async fn remove_team_member(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path((team_public_id, member_public_id)): Path<(String, String)>,
 ) -> Result<StatusCode, AppError> {
     service(state)
-        .remove_member(team_public_id, member_public_id, make_ctx())
+        .remove_member(team_public_id, member_public_id, ctx)
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }

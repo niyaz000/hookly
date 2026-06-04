@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -7,8 +7,9 @@ use axum::{
 use crate::{
     common::{
         idempotency,
+        qs_query::QsQuery,
         types::RequestContext,
-        PublicUuid, ValidatedJson,
+        ValidatedJson,
     },
     error::AppError,
     features::users::{
@@ -22,19 +23,13 @@ use crate::{
     state::AppState,
 };
 
-fn make_ctx() -> RequestContext {
-    RequestContext {
-        request_id: PublicUuid::new_v7().into_inner(),
-        created_by: PublicUuid::new_v7().into_inner(),
-    }
-}
-
 fn service(state: AppState) -> UserService {
     UserService::new(UserRepository::new(state.db))
 }
 
 pub async fn create_user(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserResponse>), AppError> {
@@ -46,13 +41,13 @@ pub async fn create_user(
             "users",
             &key,
             &hash,
-            move || async move { service(state).create(payload, make_ctx()).await },
+            move || async move { service(state).create(payload, ctx).await },
         )
         .await?;
         return Ok((StatusCode::CREATED, Json(user)));
     }
 
-    let user = service(state).create(payload, make_ctx()).await?;
+    let user = service(state).create(payload, ctx).await?;
     Ok((StatusCode::CREATED, Json(user)))
 }
 
@@ -66,57 +61,63 @@ pub async fn get_user(
 
 pub async fn update_user(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
     ValidatedJson(payload): ValidatedJson<UpdateUserRequest>,
 ) -> Result<Json<UserResponse>, AppError> {
-    let user = service(state).update(public_id, payload, make_ctx()).await?;
+    let user = service(state).update(public_id, payload, ctx).await?;
     Ok(Json(user))
 }
 
 pub async fn delete_user(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
-    service(state).delete(public_id, make_ctx()).await?;
+    service(state).delete(public_id, ctx).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn suspend_user(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<UserResponse>, AppError> {
-    let user = service(state).suspend(public_id, make_ctx()).await?;
+    let user = service(state).suspend(public_id, ctx).await?;
     Ok(Json(user))
 }
 
 pub async fn reactivate_user(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<UserResponse>, AppError> {
-    let user = service(state).reactivate(public_id, make_ctx()).await?;
+    let user = service(state).reactivate(public_id, ctx).await?;
     Ok(Json(user))
 }
 
 pub async fn lock_user(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
     ValidatedJson(payload): ValidatedJson<LockUserRequest>,
 ) -> Result<Json<UserResponse>, AppError> {
-    let user = service(state).lock(public_id, payload, make_ctx()).await?;
+    let user = service(state).lock(public_id, payload, ctx).await?;
     Ok(Json(user))
 }
 
 pub async fn unlock_user(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<UserResponse>, AppError> {
-    let user = service(state).unlock(public_id, make_ctx()).await?;
+    let user = service(state).unlock(public_id, ctx).await?;
     Ok(Json(user))
 }
 
 pub async fn list_users(
     State(state): State<AppState>,
-    Query(query): Query<ListUsersQuery>,
+    QsQuery(query): QsQuery<ListUsersQuery>,
 ) -> Result<Json<ListUsersResponse>, AppError> {
     let result = service(state).list(query).await?;
     Ok(Json(result))

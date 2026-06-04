@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -7,8 +7,9 @@ use axum::{
 use crate::{
     common::{
         idempotency,
+        qs_query::QsQuery,
         types::RequestContext,
-        PublicUuid, ValidatedJson,
+        ValidatedJson,
     },
     error::AppError,
     features::invites::{
@@ -22,19 +23,13 @@ use crate::{
     state::AppState,
 };
 
-fn make_ctx() -> RequestContext {
-    RequestContext {
-        request_id: PublicUuid::new_v7().into_inner(),
-        created_by: PublicUuid::new_v7().into_inner(),
-    }
-}
-
 fn service(state: &AppState) -> InviteService {
     InviteService::new(InviteRepository::new(state.db.clone()))
 }
 
 pub async fn create_invite(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateInviteRequest>,
 ) -> Result<(StatusCode, Json<InviteResponse>), AppError> {
@@ -47,7 +42,6 @@ pub async fn create_invite(
             &key,
             &hash,
             move || async move {
-                let ctx = make_ctx();
                 service(&state).create(payload, ctx.request_id, state.email.as_ref()).await
             },
         )
@@ -55,7 +49,6 @@ pub async fn create_invite(
         return Ok((StatusCode::CREATED, Json(invite)));
     }
 
-    let ctx = make_ctx();
     let invite = service(&state).create(payload, ctx.request_id, state.email.as_ref()).await?;
     Ok((StatusCode::CREATED, Json(invite)))
 }
@@ -70,7 +63,7 @@ pub async fn get_invite(
 
 pub async fn list_invites(
     State(state): State<AppState>,
-    Query(query): Query<ListInvitesQuery>,
+    QsQuery(query): QsQuery<ListInvitesQuery>,
 ) -> Result<Json<ListInvitesResponse>, AppError> {
     let result = service(&state).list(query).await?;
     Ok(Json(result))
@@ -94,9 +87,9 @@ pub async fn revoke_invite(
 
 pub async fn resend_invite(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<InviteResponse>, AppError> {
-    let ctx = make_ctx();
     let invite = service(&state)
         .resend(public_id, ctx.request_id, state.email.as_ref())
         .await?;

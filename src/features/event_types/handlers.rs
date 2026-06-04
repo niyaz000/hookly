@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
@@ -7,8 +7,9 @@ use axum::{
 use crate::{
     common::{
         idempotency,
+        qs_query::QsQuery,
         types::{PaginatedResponse, RequestContext},
-        PublicUuid, ValidatedJson,
+        ValidatedJson,
     },
     error::AppError,
     features::event_types::{
@@ -22,19 +23,13 @@ use crate::{
     state::AppState,
 };
 
-fn make_ctx() -> RequestContext {
-    RequestContext {
-        request_id: PublicUuid::new_v7().into_inner(),
-        created_by: PublicUuid::new_v7().into_inner(),
-    }
-}
-
 fn svc(state: AppState) -> EventTypeService {
     EventTypeService::new(EventTypeRepository::new(state.db))
 }
 
 pub async fn create_event_type(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateEventTypeRequest>,
 ) -> Result<(StatusCode, Json<EventTypeResponse>), AppError> {
@@ -46,18 +41,19 @@ pub async fn create_event_type(
             "event_types",
             &key,
             &hash,
-            move || async move { svc(state).create(payload, make_ctx()).await },
+            move || async move { svc(state).create(payload, ctx).await },
         )
         .await?;
         return Ok((StatusCode::CREATED, Json(et)));
     }
 
-    let et = svc(state).create(payload, make_ctx()).await?;
+    let et = svc(state).create(payload, ctx).await?;
     Ok((StatusCode::CREATED, Json(et)))
 }
 
 pub async fn create_version(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
     headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateVersionRequest>,
@@ -72,20 +68,20 @@ pub async fn create_version(
             &key,
             &hash,
             move || async move {
-                svc(state).create_version(public_id, payload, make_ctx()).await
+                svc(state).create_version(public_id, payload, ctx).await
             },
         )
         .await?;
         return Ok((StatusCode::CREATED, Json(et)));
     }
 
-    let et = svc(state).create_version(public_id, payload, make_ctx()).await?;
+    let et = svc(state).create_version(public_id, payload, ctx).await?;
     Ok((StatusCode::CREATED, Json(et)))
 }
 
 pub async fn list_event_types(
     State(state): State<AppState>,
-    Query(params): Query<ListQueryParams>,
+    QsQuery(params): QsQuery<ListQueryParams>,
 ) -> Result<(StatusCode, Json<PaginatedResponse<EventTypeResponse>>), AppError> {
     let result = svc(state).list(params).await?;
     Ok((StatusCode::OK, Json(result)))
@@ -117,33 +113,37 @@ pub async fn get_schema(
 
 pub async fn update_event_type(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
     ValidatedJson(payload): ValidatedJson<UpdateEventTypeRequest>,
 ) -> Result<(StatusCode, Json<EventTypeResponse>), AppError> {
-    let et = svc(state).update_description(public_id, payload, make_ctx()).await?;
+    let et = svc(state).update_description(public_id, payload, ctx).await?;
     Ok((StatusCode::OK, Json(et)))
 }
 
 pub async fn delete_event_type(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
-    svc(state).delete_by_id(public_id, make_ctx()).await?;
+    svc(state).delete_by_id(public_id, ctx).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn archive_event_type(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<(StatusCode, Json<EventTypeResponse>), AppError> {
-    let et = svc(state).archive(public_id, make_ctx()).await?;
+    let et = svc(state).archive(public_id, ctx).await?;
     Ok((StatusCode::OK, Json(et)))
 }
 
 pub async fn unarchive_event_type(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<(StatusCode, Json<EventTypeResponse>), AppError> {
-    let et = svc(state).unarchive(public_id, make_ctx()).await?;
+    let et = svc(state).unarchive(public_id, ctx).await?;
     Ok((StatusCode::OK, Json(et)))
 }

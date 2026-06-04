@@ -11,6 +11,7 @@ tower-http = { version = "0.5", features = ["trace", "cors", "request-id"] }
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_qs = "0.13"
 
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "migrate", "json"] }
 redis = { version = "0.27", features = ["tokio-comp", "aio"] }
