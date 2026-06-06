@@ -12,19 +12,27 @@ use crate::{
         ValidatedJson,
     },
     error::AppError,
-    features::tenants::{
-        models::{
-            CreateTenantRequest, ListTenantsQuery, ListTenantsResponse, TenantResponse,
-            UpdateTenantRequest,
+    features::{
+        permissions::repository::PermissionRepository,
+        roles::repository::RoleRepository,
+        tenants::{
+            models::{
+                CreateTenantRequest, ListTenantsQuery, ListTenantsResponse, TenantResponse,
+                UpdateTenantRequest,
+            },
+            repository::TenantRepository,
+            service::TenantService,
         },
-        repository::TenantRepository,
-        service::TenantService,
     },
     state::AppState,
 };
 
 fn service(state: AppState) -> TenantService {
-    TenantService::new(TenantRepository::new(state.db))
+    TenantService::new(
+        TenantRepository::new(state.db.clone()),
+        RoleRepository::new(state.db.clone()),
+        PermissionRepository::new(state.db),
+    )
 }
 
 pub async fn create_tenant(

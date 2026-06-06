@@ -12,8 +12,8 @@ use uuid::Uuid;
 use crate::common::{access_log, types::RequestContext};
 use crate::error::{AppError, REQUEST_ID};
 use crate::features::{
-    api_keys, applications, endpoints, environments, event_types, events, invites, organizations,
-    schedules, teams, tenants, users,
+    api_keys, applications, assignments, endpoints, environments, event_types, events, invites,
+    jwt_keys, organizations, permissions, roles, schedules, teams, tenants, users,
 };
 use crate::state::AppState;
 
@@ -46,7 +46,11 @@ fn v1_routes(state: AppState) -> Router {
         .merge(endpoints::routes::routes(state.clone()))
         .merge(events::routes::routes(state.clone()))
         .merge(api_keys::routes::routes(state.clone()))
-        .merge(environments::routes::routes(state))
+        .merge(environments::routes::routes(state.clone()))
+        .merge(permissions::routes::routes(state.clone()))
+        .merge(roles::routes::routes(state.clone()))
+        .merge(assignments::routes::routes(state.clone()))
+        .merge(jwt_keys::routes::routes(state))
         .route_layer(middleware::from_fn(inject_request_context))
         .route_layer(middleware::from_fn(access_log::access_log))
 }

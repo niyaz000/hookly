@@ -1,12 +1,16 @@
 pub mod api_keys;
 pub mod applications;
+pub mod assignments;
 pub mod delivery;
 pub mod endpoints;
 pub mod environments;
 pub mod event_types;
 pub mod events;
 pub mod invites;
+pub mod jwt_keys;
 pub mod organizations;
+pub mod permissions;
+pub mod roles;
 pub mod schedules;
 pub mod teams;
 pub mod tenants;

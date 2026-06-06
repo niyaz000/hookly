@@ -3,6 +3,8 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{common::types::RequestContext, error::AppError};
+use crate::features::permissions::repository::PermissionRepository;
+use crate::features::roles::repository::RoleRepository;
 
 use super::{
     models::{
@@ -14,11 +16,13 @@ use super::{
 
 pub struct TenantService {
     repo: TenantRepository,
+    role_repo: RoleRepository,
+    perm_repo: PermissionRepository,
 }
 
 impl TenantService {
-    pub fn new(repo: TenantRepository) -> Self {
-        Self { repo }
+    pub fn new(repo: TenantRepository, role_repo: RoleRepository, perm_repo: PermissionRepository) -> Self {
+        Self { repo, role_repo, perm_repo }
     }
 
     #[tracing::instrument(skip(self, req, ctx), fields(name = %req.name))]
@@ -31,6 +35,13 @@ impl TenantService {
         info!("creating tenant");
         let tenant = self.repo.create(req, ctx).await?;
         info!(public_id = %tenant.public_id, "tenant created");
+
+        // Seed default roles (owner, admin, developer, viewer) for the new tenant
+        let system_perms = self.perm_repo.list_system().await?;
+        if let Err(e) = self.role_repo.seed_default_roles(tenant.id, &system_perms, ctx).await {
+            tracing::warn!(tenant_id = %tenant.id, error = ?e, "failed to seed default roles");
+        }
+
         Ok(TenantResponse::from(tenant))
     }
 

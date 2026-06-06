@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use dotenvy::dotenv;
 use hookly::queue;
 
@@ -27,6 +29,23 @@ async fn main() {
         queue::ensure_consumer_group(&state.redis, stream, "$")
             .await
             .expect("Failed to ensure Redis consumer group");
+    }
+
+    // Background task: disable JWT keys whose rotation grace period has ended
+    {
+        use features::jwt_keys::repository::JwtKeyRepository;
+        let repo = JwtKeyRepository::new(state.db.clone());
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                match repo.expire_grace_period_keys().await {
+                    Ok(n) if n > 0 => tracing::info!(count = n, "expired rotated jwt keys"),
+                    Err(e) => tracing::warn!(error = ?e, "failed to expire rotated jwt keys"),
+                    _ => {}
+                }
+            }
+        });
     }
 
     let app = router::create_router(state);
