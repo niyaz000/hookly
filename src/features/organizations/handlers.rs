@@ -5,12 +5,7 @@ use axum::{
 };
 
 use crate::{
-    common::{
-        idempotency,
-        qs_query::QsQuery,
-        types::RequestContext,
-        ValidatedJson,
-    },
+    common::{idempotency, qs_query::QsQuery, types::RequestContext, ValidatedJson},
     error::AppError,
     features::organizations::{
         models::{
@@ -36,13 +31,9 @@ pub async fn create_organization(
     if let Some(key) = idempotency::extract_key(&headers)? {
         let hash = idempotency::body_hash(&payload);
         let redis = state.redis.clone();
-        let org = idempotency::resolve(
-            &redis,
-            "organizations",
-            &key,
-            &hash,
-            move || async move { service(state).create(payload, ctx).await },
-        )
+        let org = idempotency::resolve(&redis, "organizations", &key, &hash, move || async move {
+            service(state).create(payload, ctx).await
+        })
         .await?;
         return Ok((StatusCode::CREATED, Json(org)));
     }
