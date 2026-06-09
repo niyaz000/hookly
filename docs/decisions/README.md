@@ -11,13 +11,14 @@ Decisions about the shape of the HTTP API: response envelopes, error formats, id
 | # | Title | Status |
 |---|---|---|
 | [001](api-design/001-cursor-pagination.md) | Cursor-based pagination over OFFSET | Accepted |
-| 002 | Dual ID strategy: UUIDv7 (internal) + prefixed NanoId (public) | Planned |
+| [002](api-design/002-dual-id-strategy.md) | Dual ID strategy: internal UUIDv7 and public prefixed NanoId | Accepted |
 | [003](api-design/003-error-response-shape.md) | Error response shape, status codes, and auth failure handling | Accepted |
 | [004](api-design/004-soft-delete.md) | Soft delete as the default mutation pattern | Accepted |
 | [005](api-design/005-naming-conventions.md) | Naming conventions, URL structure, and request limits | Accepted |
 | [006](api-design/006-versioning-strategy.md) | API versioning strategy and breaking change policy | Accepted |
 | [007](api-design/007-idempotency-key.md) | Idempotency key design and replay semantics | Accepted |
 | [008](api-design/008-filtering-and-sorting.md) | Filtering and sorting query parameters | Accepted |
+| [009](api-design/009-public-id-length.md) | Public ID length — 16-character NanoId on a 62-symbol alphabet | Accepted |
 
 ---
 

@@ -179,22 +179,8 @@ BEGIN
     SELECT id INTO v_ep_id
     FROM endpoints WHERE public_id = '$EP_PUB';
 
-    -- Placeholder signing secret (not a valid AES-GCM envelope — replace for real delivery testing).
-    INSERT INTO endpoint_secrets (
-        id, public_id, endpoint_id, tenant_id, organization_id,
-        secret, request_id, created_by
-    )
-    VALUES (
-        gen_random_uuid(),
-        '$SEC_PUB',
-        v_ep_id, v_ten_id, v_org_id,
-        'v1\$seed_placeholder_nonce\$seed_placeholder_ciphertext',
-        v_req_id, v_sys_user
-    )
-    ON CONFLICT (public_id) DO NOTHING;
-
     RAISE NOTICE '[5/5] endpoint      public_id=% internal_id=%', '$EP_PUB', v_ep_id;
-    RAISE NOTICE '      secret        public_id=%', '$SEC_PUB';
+    RAISE NOTICE '      (signing secret will be generated via API rotate call)';
 
     RAISE NOTICE '';
     RAISE NOTICE '=== Seed complete ===';
@@ -217,6 +203,23 @@ fi
 
 echo "Connecting to Postgres..."
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<< "$SQL"
+
+# ---------------------------------------------------------------------------
+# Generate a real signing secret via the API (replaces any stale placeholder)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Rotating signing secret for $EP_PUB ==="
+ROTATE_STATUS=$(curl -s -o /tmp/hookly_rotate_response.json -w "%{http_code}" \
+    -X POST "$BASE_URL/api/v1/endpoints/$EP_PUB/secret/rotate" \
+    -H "Content-Type: application/json" \
+    -d '{"expiry_seconds": 0}')
+
+if [[ "$ROTATE_STATUS" == "200" ]]; then
+    echo "Secret rotated OK."
+else
+    echo "WARNING: rotate returned HTTP $ROTATE_STATUS — is the server running on $BASE_URL?" >&2
+    echo "Worker delivery will fail until a valid secret is generated (run the rotate endpoint manually)." >&2
+fi
 
 # ---------------------------------------------------------------------------
 # Send a test event via the running API

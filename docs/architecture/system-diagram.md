@@ -1,6 +1,8 @@
 # System architecture diagram
 
-This document shows the full Hookly system topology, the event and schedule delivery flows, and the key state machines.
+This document shows the full Hookly system topology, the event delivery flow, and the key state machines.
+
+For the scheduled event flow — shard ownership, multi-instance coordination, tick loop, and outbox write analysis — see [scheduled event flow](scheduled-event-flow.md).
 
 ---
 
@@ -194,46 +196,6 @@ sequenceDiagram
             Note over Worker: Client config error — retrying will not help.<br/>Tenant must fix endpoint and manually retry.
         end
     end
-```
-
----
-
-## Scheduled event flow
-
-Shows how a tenant-defined cron schedule is evaluated by the scheduler and then follows the same delivery path.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Client
-    participant API as API Server
-    participant PGW as PG Primary
-    participant SchedR as Redis Scheduler
-    participant Sched as hookly-scheduler
-    participant Relay as Outbox Relay
-    participant Queue as Redis Streams
-    participant Worker as Worker Pool
-    participant EP as Tenant Endpoint
-
-    Client->>API: POST /api/v1/schedules<br/>{cron_expression, timezone, event_type, payload, endpoint_ids}
-    API->>PGW: INSERT schedules {next_run_at=computed from cron, status=active}
-    API->>SchedR: ZADD sched:pending:{shard} {next_run_at_unix} {schedule_id}
-    API->>Client: 201 Created
-
-    Note over Sched: Tick loop — every 5s per owned shard
-    Sched->>SchedR: ZRANGEBYSCORE sched:pending:{shard} 0 {now_unix} LIMIT 500
-    Sched->>SchedR: SET NX sched:fire:{schedule_id}:{minute_bucket} EX 120
-    Note over Sched: Lock prevents duplicate fire from<br/>another scheduler instance racing this shard
-
-    Sched->>PGW: BEGIN<br/>INSERT events {schedule_sourced=true}<br/>INSERT delivery_jobs (one per endpoint)<br/>INSERT outbox (one per delivery_job)<br/>UPDATE schedules SET next_run_at={next}, last_run_at=NOW()<br/>COMMIT
-
-    Sched->>SchedR: ZADD sched:pending:{shard} {new_next_run_at} {schedule_id}
-
-    Note over Relay,EP: Delivery follows identical path to event submission flow
-    Relay->>PGW: SELECT FROM outbox FOR UPDATE SKIP LOCKED
-    Relay->>Queue: XADD hookly:delivery:{tier}:{priority}
-    Worker->>Queue: XREADGROUP
-    Worker->>EP: POST /webhook
 ```
 
 ---

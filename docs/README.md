@@ -11,6 +11,8 @@
 - [System diagram](architecture/system-diagram.md) — full architecture diagram: topology, event delivery sequence, circuit breaker and job state machines
 - [Data model](architecture/data-model.md) — schema by domain with design notes
 - [Delivery pipeline](architecture/delivery-pipeline.md) — event emission → Redis queue → endpoint delivery
+- [Scheduled event flow](architecture/scheduled-event-flow.md) — shard ownership, multi-instance tick coordination, outbox write analysis
+- [Idempotency](architecture/idempotency.md) — body hashing, Redis storage layout, lock protocol, failure semantics
 
 ### Features
 - [Platform webhooks](features/platform-webhooks.md) — platform event catalog, subscriptions, signing
@@ -28,7 +30,7 @@ See the [full decision index](decisions/README.md) for all accepted and planned 
 
 | Area | Accepted decisions |
 |---|---|
-| [api-design](decisions/api-design/) | Cursor pagination · Error response shape · Soft delete · Naming conventions · Versioning strategy · Idempotency key · Filtering and sorting |
+| [api-design](decisions/api-design/) | Cursor pagination · Dual ID strategy · Error response shape · Soft delete · Naming conventions · Versioning strategy · Idempotency key · Filtering and sorting · Public ID length |
 | [architecture](decisions/architecture/) | Two-binary (API + worker) · Scheduler binary · Outbox pattern |
 | [database](decisions/database/) | No FK constraints · PostgreSQL primary · Read replica split |
 | [delivery](decisions/delivery/) | Redis Streams queue · Platform webhooks · At-least-once delivery · Retry policy · Work-stealing pool · Circuit breaker · Rate limiting · Queue abstraction · Tenant tiering |
