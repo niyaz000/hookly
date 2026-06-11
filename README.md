@@ -31,12 +31,12 @@ Hookly exposes a REST API that lets platform operators and tenants:
        │  INSERT events + delivery_jobs
        │  XADD Redis Stream (best-effort)
        ▼
-┌──────────────────────┐      ┌─────────────────────────────────┐
-│  PostgreSQL          │◄─────│  hookly-worker                  │
-│  (source of truth)   │      │  XREADGROUP · HMAC-SHA256 sign  │
-│  events              │      │  HTTP delivery · retry backoff  │
-│  delivery_jobs       │      │  XAUTOCLAIM recovery            │
-│  delivery_attempts   │      │  Outbox poller                  │
+┌──────────────────────┐      ┌─────────────────────────────────┐      ┌──────────────────────────┐
+│  PostgreSQL          │◄─────│  hookly-worker                  │─────►│  Customer HTTP Endpoints │
+│  (source of truth)   │      │  XREADGROUP · HMAC-SHA256 sign  │      │  POST /your-webhook      │
+│  events              │      │  HTTP delivery · retry backoff  │      │  HMAC-SHA256 signature   │
+│  delivery_jobs       │      │  XAUTOCLAIM recovery            │      │  verified by recipient   │
+│  delivery_attempts   │      │  Outbox poller                  │      └──────────────────────────┘
 └──────────────────────┘      └──────────────┬──────────────────┘
        ▲                                      │
        │  Fire: INSERT events                 │  XADD
