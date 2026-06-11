@@ -2,7 +2,7 @@
 
 A multi-tenant webhook and event delivery platform, built to answer a question: *how would you build scheduling and webhook infrastructure from scratch today, with the discipline of a team that could go broke tomorrow?*
 
-The short version: battle-tested components, two binaries, per-tenant encryption, cursor pagination, and every delivery attempt fully traceable from request ID to HTTP response. Read [Why Hookly](docs/vision.md) for the full context — where this came from, what problems it is solving, and where it is going.
+The short version: battle-tested components, tenant isolation, simple abstractions, encryption, exceptional debuggability. Read [Why Hookly](docs/vision.md) for the full context — where this came from, what problems it is solving, and where it is going.
 
 ## What it does
 

@@ -77,73 +77,81 @@ Reliability is not achieved by adding redundancy to a complex system. It is achi
 
 The fewer moving parts, the fewer failure modes. The fewer failure modes, the fewer pages. The fewer pages, the smaller the team you need to keep things running. Simplicity is a multiplier on reliability, not a trade-off against it.
 
-### 3. Two-person operations ceiling
+### 3. Customer obsession: the customer must never feel the infrastructure
+
+No matter what happens inside the system — a Redis restart, a database failover, a scheduler shard crash, a slow external endpoint, a bad deployment — the customer's experience must be preserved. Retries are automatic. Backpressure is absorbed internally. Circuit breakers prevent a failing endpoint from degrading the worker pool. The outbox pattern ensures delivery jobs survive queue restarts.
+
+Every failure mode is designed around one question: **does the customer ever notice?**
+
+The system must absorb failures, not surface them. An infrastructure incident that requires no human intervention and leaves no customer-visible scar is the goal. If a customer has to open a support ticket because an internal component misbehaved, that is a design failure — not an operational one. The infrastructure layer exists precisely to ensure that "crazy things happening inside" never translates into degraded experience outside.
+
+### 4. Two-person operations ceiling
 
 The entire platform — from deployment to incident response to onboarding a new tenant — should be runnable by a maximum of two people. Any design decision that makes this harder is the wrong decision.
 
 This is the forcing function that prevents accidental complexity. If a new engineer cannot be productive on day one, if an incident cannot be diagnosed without tribal knowledge, if scaling requires coordination across multiple teams — those are design failures, not operational realities.
 
-### 4. Performance as a first-class concern
+### 5. Performance as a first-class concern
 
 Low latency and high throughput are not features to be added later — they are properties the system must carry from the first line of code. Sub-second API responses, efficient queue processing, and minimal overhead per delivery attempt are non-negotiable.
 
 Performance work that cannot be done frugally — through better algorithms, smarter batching, reduced allocations — is preferred over performance work that requires more hardware. Spend CPU cycles wisely before spending money.
 
-### 5. Observability for everyone
+### 6. Observability for everyone
 
 Debugging should not require access to production databases or internal tooling. Tenants should be able to answer "why didn't my webhook fire?" from a self-serve interface. Operators should be able to see the health of the entire platform at a glance.
 
 Observability is a product feature, not an internal tool. If a tenant has to open a support ticket to understand what happened to their event, the system has failed them. Every delivery attempt, every failure, every retry is a fact that should be surfaced — to the right person, at the right level of detail.
 
-### 6. Security as a first-class citizen
+### 7. Security as a first-class citizen
 
 Security is not a layer added at the end. It is a property of the system that every design decision either upholds or erodes.
 
 Tenant data is isolated by default, not by configuration. Credentials are encrypted at rest, always. Every action is attributable to a principal. Every sensitive operation leaves an audit trail. There are no back doors, no "internal" paths that bypass the permission model.
 
-### 7. Access control for everything
+### 8. Access control for everything
 
 Every resource has an owner. Every operation is authorized. Every credential has a scope. There is no concept of privileged internal access that bypasses the permission system — the same rules apply to operators, tenants, and automated systems.
 
 Fine-grained access control is not a feature for enterprise customers. It is the default from day one.
 
-### 8. Tenant isolation: one bad actor cannot wreck others
+### 9. Tenant isolation: one bad actor cannot wreck others
 
 In a multi-tenant system, the most important reliability guarantee is that one tenant's behavior cannot degrade another's experience. A misconfigured endpoint, a burst of events, a slow consumer — none of these should propagate beyond the tenant boundary.
 
 Fair usage limits and per-tenant resource controls are not nice-to-haves. They are the enforcement mechanism for a core promise.
 
-### 9. Developer experience is a first-class feature
+### 10. Developer experience is a first-class feature
 
 The difference between a tool developers love and one they tolerate is almost never the core feature set. It is the hundred small things: clear error messages, consistent response shapes, predictable behavior, IDs that tell you what resource they belong to.
 
 The path from "I want to deliver webhooks" to "webhooks are delivering" should be as short as possible. Sane defaults remove decision fatigue for the common case. Good developer experience is not polish — it is a force multiplier on adoption, debugging speed, and operational confidence.
 
-### 10. Battle-tested components only
+### 11. Battle-tested components only
 
 No alpha-stage dependencies. No novel consensus protocols. No databases we cannot hire engineers for. No infrastructure that requires specialist knowledge to operate.
 
 When something goes wrong at 3am, the engineer on call should be able to find a well-understood runbook — not debug an obscure distributed systems primitive. The boring choice is usually the right choice.
 
-### 11. Minimal external dependencies
+### 12. Minimal external dependencies
 
 Every external dependency is a failure mode, a scaling bottleneck, and a cost center. Dependencies should be chosen deliberately, kept to the minimum necessary, and replaced with simpler alternatives wherever possible.
 
 Vendor lock-in at the infrastructure layer is not a constraint we accept. The system should be deployable on-premises or across any cloud provider without changing application code.
 
-### 12. Auditing as a core feature
+### 13. Auditing as a core feature
 
 Every configuration change, every credential rotation, every delivery attempt is a fact that should be recorded and queryable. Audit trails are not compliance theatre — they are the foundation of debuggability, security forensics, and customer trust.
 
 An event-driven system that cannot explain its own history is not trustworthy.
 
-### 13. Automation and self-healing
+### 14. Automation and self-healing
 
 Manual intervention is a cost. Every time a human has to restart a process, retry a delivery, or clear a stuck queue, that is time and attention that should have been spent on something else.
 
 The system should detect and recover from common failure modes automatically. Where full automation is not possible, it should surface the problem clearly and provide the tooling to resolve it quickly — without requiring a specialist.
 
-### 14. AI-native, not AI-bolted-on
+### 15. AI-native, not AI-bolted-on
 
 This system was designed alongside AI tooling, not before it. Code is written to be readable by a language model and a human equally. Error messages are structured to be parseable, not just human-readable. Every architectural decision is documented so that an AI assistant can reconstruct context without access to Slack history or tribal memory.
 
