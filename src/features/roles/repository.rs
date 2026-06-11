@@ -103,10 +103,10 @@ impl RoleRepository {
             qb.push(" AND public_id > ").push_bind(c.clone());
         }
 
-        qb.push(" ORDER BY public_id ASC LIMIT ").push_bind(limit + 1);
+        qb.push(" ORDER BY public_id ASC LIMIT ")
+            .push_bind(limit + 1);
 
-        let mut roles: Vec<Role> =
-            qb.build_query_as::<Role>().fetch_all(&self.pool).await?;
+        let mut roles: Vec<Role> = qb.build_query_as::<Role>().fetch_all(&self.pool).await?;
 
         let next_cursor = if roles.len() as i64 > limit {
             roles.pop().map(|r| r.public_id)
@@ -258,40 +258,73 @@ impl RoleRepository {
     ) -> Result<(), AppError> {
         debug!(tenant_id = %tenant_id, "seeding default roles");
 
-        let all_perm_ids: Vec<(Uuid, &str)> =
-            system_permissions.iter().map(|p| (p.id, p.name.as_str())).collect();
+        let all_perm_ids: Vec<(Uuid, &str)> = system_permissions
+            .iter()
+            .map(|p| (p.id, p.name.as_str()))
+            .collect();
 
         let definitions: &[(&str, &[&str])] = &[
             ("owner", &["*:*"]),
             (
                 "admin",
                 &[
-                    "applications:read", "applications:write", "applications:delete",
-                    "endpoints:read",    "endpoints:write",    "endpoints:delete",
-                    "event_types:read",  "event_types:write",  "event_types:delete",
-                    "events:read",       "events:send",        "events:delete",
-                    "schedules:read",    "schedules:write",    "schedules:delete",
-                    "environments:read", "environments:write",
-                    "api_keys:read",     "api_keys:write",     "api_keys:delete",
-                    "jwt_keys:read",     "jwt_keys:write",     "jwt_keys:delete", "jwt_keys:rotate",
-                    "users:read",        "users:write",
-                    "teams:read",        "teams:write",        "teams:delete",
-                    "roles:read",        "roles:write",        "roles:delete",
-                    "permissions:read",  "permissions:write",  "permissions:delete",
-                    "invites:read",      "invites:write",
+                    "applications:read",
+                    "applications:write",
+                    "applications:delete",
+                    "endpoints:read",
+                    "endpoints:write",
+                    "endpoints:delete",
+                    "event_types:read",
+                    "event_types:write",
+                    "event_types:delete",
+                    "events:read",
+                    "events:send",
+                    "events:delete",
+                    "schedules:read",
+                    "schedules:write",
+                    "schedules:delete",
+                    "environments:read",
+                    "environments:write",
+                    "api_keys:read",
+                    "api_keys:write",
+                    "api_keys:delete",
+                    "jwt_keys:read",
+                    "jwt_keys:write",
+                    "jwt_keys:delete",
+                    "jwt_keys:rotate",
+                    "users:read",
+                    "users:write",
+                    "teams:read",
+                    "teams:write",
+                    "teams:delete",
+                    "roles:read",
+                    "roles:write",
+                    "roles:delete",
+                    "permissions:read",
+                    "permissions:write",
+                    "permissions:delete",
+                    "invites:read",
+                    "invites:write",
                     "tenant:read",
                 ],
             ),
             (
                 "developer",
                 &[
-                    "applications:read", "applications:write",
-                    "endpoints:read",    "endpoints:write",
-                    "event_types:read",  "event_types:write",
-                    "events:read",       "events:send",
-                    "schedules:read",    "schedules:write",
-                    "environments:read", "environments:write",
-                    "api_keys:read",     "api_keys:write",
+                    "applications:read",
+                    "applications:write",
+                    "endpoints:read",
+                    "endpoints:write",
+                    "event_types:read",
+                    "event_types:write",
+                    "events:read",
+                    "events:send",
+                    "schedules:read",
+                    "schedules:write",
+                    "environments:read",
+                    "environments:write",
+                    "api_keys:read",
+                    "api_keys:write",
                     "jwt_keys:read",
                 ],
             ),

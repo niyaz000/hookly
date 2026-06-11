@@ -20,6 +20,12 @@ reqwest = { version = "0.12", features = ["json"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
+opentelemetry = "0.32"
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic"] }
+opentelemetry-semantic-conventions = "0.32"
+tracing-opentelemetry = "0.33"
+
 async-trait = "0.1"
 dotenvy = "0.15"
 envy = "0.4"
@@ -46,6 +52,10 @@ path = "src/main.rs"
 [[bin]]
 name = "worker"
 path = "src/worker/main.rs"
+
+[[bin]]
+name = "scheduler"
+path = "src/scheduler/main.rs"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

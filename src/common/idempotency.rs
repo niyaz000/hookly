@@ -82,6 +82,7 @@ where
         if record.body_hash != hash {
             return Err(AppError::Conflict(
                 "Idempotency key already used with a different request body".into(),
+                vec![],
             ));
         }
 
@@ -105,6 +106,7 @@ where
     if acquired.is_none() {
         return Err(AppError::Conflict(
             "A concurrent request with this idempotency key is already in progress".into(),
+            vec![],
         ));
     }
 
@@ -129,8 +131,7 @@ where
     // ── 5. On success, persist the response; on error leave no record ────────
     match result {
         Ok(response) => {
-            let response_val = serde_json::to_value(&response)
-                .unwrap_or(serde_json::Value::Null);
+            let response_val = serde_json::to_value(&response).unwrap_or(serde_json::Value::Null);
             let record = StoredRecord {
                 body_hash: hash.to_owned(),
                 response: response_val,

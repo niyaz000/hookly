@@ -137,6 +137,7 @@ impl EventTypeService {
                     warn!("event_type version conflict");
                     Err(AppError::Conflict(
                         "version mismatch — fetch the latest version and retry".into(),
+                        vec![],
                     ))
                 }
             }

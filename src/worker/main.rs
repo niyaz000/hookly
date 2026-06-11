@@ -14,12 +14,8 @@ mod reclaim;
 async fn main() {
     dotenv().ok();
 
-    tracing_subscriber::fmt()
-        .json()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
     let cfg = hookly::config::Config::from_env().expect("Failed to load configuration");
+    let _otel = hookly::telemetry::init(&cfg);
     let worker_cfg = config::WorkerConfig::from_env();
 
     let db = sqlx::PgPool::connect(&cfg.database.url)

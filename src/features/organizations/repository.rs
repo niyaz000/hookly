@@ -30,8 +30,6 @@ impl OrganizationRepository {
         let public_id = format!("org_{}", NanoId::generate(20));
         let now = Utc::now();
 
-        debug!(public_id = %public_id, "inserting organization");
-
         let org = sqlx::query_as::<_, Organization>(
             r#"
             INSERT INTO organizations (
@@ -52,8 +50,8 @@ impl OrganizationRepository {
         )
         .bind(id)
         .bind(&public_id)
-        .bind(&req.name)
-        .bind(&req.slug)
+        .bind(&req.name.trim())
+        .bind(&&req.slug.to_lowercase().trim())
         .bind(&req.billing_email)
         .bind(req.stripe_customer_id.as_deref())
         .bind(req.external_id.as_deref())

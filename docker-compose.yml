@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hookly
+      POSTGRES_PASSWORD: hookly
+      POSTGRES_DB: hookly
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hookly"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    image: hookly
+    build: .
+    command: sqlx migrate run
+    environment: &env
+      DATABASE_URL: postgres://hookly:hookly@postgres:5432/hookly
+      REDIS_URL: redis://redis:6379
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: "3000"
+      CRYPTO_MASTER_KEY: ${CRYPTO_MASTER_KEY}
+      CRYPTO_API_KEY_ENCRYPTION_KEY: ${CRYPTO_API_KEY_ENCRYPTION_KEY}
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    image: hookly
+    build: .
+    command: /usr/local/bin/hookly
+    environment: *env
+    ports:
+      - "3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    image: hookly
+    build: .
+    command: /usr/local/bin/worker
+    environment: *env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    image: hookly
+    build: .
+    command: /usr/local/bin/scheduler
+    environment: *env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy

@@ -2,13 +2,15 @@
 
 This document covers how the `hookly-scheduler` binary evaluates cron schedules, manages distributed shard ownership across multiple instances, and hands off fired jobs to the delivery pipeline.
 
+For how shards are assigned at schedule create time, how tenants are pinned to dedicated shards, how shards map to Redis instances, and how to scale or drain shards — see [scheduler sharding](scheduler-sharding.md).
+
 For the delivery step itself — Streams pickup, worker pool, HTTP delivery, retries, circuit breaking — see the [delivery pipeline](delivery-pipeline.md).
 
 ---
 
 ## Overview
 
-A cron schedule is a tenant-defined rule: "at this cron expression, POST this payload to these endpoints." The scheduler's job is to detect due schedules and emit events for them, without duplicate fires, even when multiple scheduler instances run concurrently.
+A cron schedule is a tenant-defined rule: "at this cron expression, POST this payload to these endpoints(singular for now)." The scheduler's job is to detect due schedules and emit events for them, without duplicate fires, even when multiple scheduler instances run concurrently.
 
 Three concerns are kept separate:
 
@@ -22,14 +24,14 @@ Three concerns are kept separate:
 
 ### Why shards
 
-A single scheduler instance polling all schedules every 5s is both a single point of failure and a throughput ceiling. Sharding distributes the load:
+A single scheduler instance polling all schedules every n seconds is both a single point of failure and a throughput ceiling. Sharding distributes the load:
 
 - The schedule space is divided into `N` shards (default: 4, configurable)
-- Each schedule is assigned to a shard deterministically: `schedule_id_bytes[0] % N`
-- Each shard has its own Redis sorted set: `sched:pending:{shard}`
+- Each schedule is assigned a shard once at create time and stored as `schedules.assigned_shard` — see [scheduler sharding](scheduler-sharding.md) for the full assignment logic
+- Each shard has its own Redis sorted set: `sched:pending:{shard}`, which can be on a shared or dedicated Redis node
 - Scheduler instances claim ownership of shards; each owned shard gets its own independent tick loop
 
-Because assignment is hash-based and stable, the same schedule always maps to the same shard — no coordination is needed for placement.
+Because the shard is stored in the database and never recomputed, changing shard count does not move existing schedules and no coordination is needed for placement.
 
 ### How a scheduler claims and holds shards
 

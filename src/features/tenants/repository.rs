@@ -18,15 +18,26 @@ impl TenantRepository {
         Self { pool }
     }
 
+    pub async fn resolve_organization(&self, public_id: &str) -> Result<Option<Uuid>, AppError> {
+        let id = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM organizations WHERE public_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
     pub async fn create(
         &self,
         req: CreateTenantRequest,
+        organization_id: Uuid,
         ctx: RequestContext,
     ) -> Result<Tenant, AppError> {
         let id = Uuid::now_v7();
         let public_id = format!("ten_{}", NanoId::generate(20));
 
-        debug!(public_id = %public_id, "inserting tenant");
+        debug!(public_id = %public_id, organization_id = %organization_id, "inserting tenant");
 
         let tenant = sqlx::query_as::<_, Tenant>(
             r#"
@@ -46,7 +57,7 @@ impl TenantRepository {
         )
         .bind(id)
         .bind(&public_id)
-        .bind(req.organization_id)
+        .bind(organization_id)
         .bind(&req.name)
         .bind(req.description.as_deref())
         .bind(Json(req.tags.unwrap_or_default()))

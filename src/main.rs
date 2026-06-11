@@ -10,17 +10,14 @@ mod error;
 mod features;
 mod router;
 mod state;
+mod telemetry;
 
 #[tokio::main]
 async fn main() {
     dotenv().ok();
 
-    tracing_subscriber::fmt()
-        .json()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
     let config = config::Config::from_env().expect("Failed to load configuration");
+    let _otel = telemetry::init(&config);
     let state = state::AppState::new(&config)
         .await
         .expect("Failed to initialize AppState");

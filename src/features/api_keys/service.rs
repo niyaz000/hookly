@@ -79,10 +79,13 @@ impl ApiKeyService {
                     max_keys = max,
                     "user has reached max api key limit"
                 );
-                return Err(AppError::Conflict(format!(
-                    "user has reached the maximum of {} api key(s) for this tenant",
-                    max
-                )));
+                return Err(AppError::Conflict(
+                    format!(
+                        "user has reached the maximum of {} api key(s) for this tenant",
+                        max
+                    ),
+                    vec![],
+                ));
             }
         }
 

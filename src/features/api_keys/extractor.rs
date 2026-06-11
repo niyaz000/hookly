@@ -9,8 +9,8 @@ use super::crypto;
 use super::models::ApiKeyStatus;
 use super::repository::ApiKeyRepository;
 
-/// Injected into handlers that require API key authentication.
-/// Not applied to any routes yet — opt in by adding it as a handler parameter.
+/// Injected into request extensions by the `authenticate` middleware for all protected routes.
+#[derive(Clone)]
 pub struct ApiKeyPrincipal {
     pub api_key_public_id: String,
     pub tenant_id: Uuid,

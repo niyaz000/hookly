@@ -25,7 +25,17 @@ sched:pending:{shard}   sorted set
   member = schedule_id (UUID string)
 ```
 
-`num_shards` is configurable (default: 4). Shard assignment is deterministic: `schedule_id_bytes[0] % num_shards`. The same schedule always maps to the same shard — no coordination needed for placement.
+`num_shards` is configurable (default: 4). Shard assignment uses a **routing sorted set** in Coordinator Redis:
+
+```
+sched:routing   sorted set
+  score  = number of schedules currently assigned to this shard
+  member = shard_id
+```
+
+The API server picks the lowest-score member (fewest current schedules) atomically via a Lua script, then increments that shard's score. This produces a round-robin distribution without a hash function. The computed shard is stored as `schedules.assigned_shard` at create time and never recomputed — no coordination needed for placement.
+
+For the full assignment model — tenant affinity, multi-Redis topology, shard states, drain and decommission protocol — see [scheduler sharding](../../architecture/scheduler-sharding.md).
 
 ### Shard ownership
 
@@ -78,6 +88,7 @@ Cron expressions with sub-minute resolution (e.g., `*/30 * * * * *`) are not sup
 | Database polling only (no sorted sets) | At 500K active schedules, polling the DB every 5 seconds per scheduler instance is 12 DB queries/minute per instance; with 4 scheduler instances this is 48 DB reads/minute on a table with 500K rows; the index makes each cheap, but sorted sets are cheaper still |
 | In-memory heap (no Redis) | State is lost on scheduler restart; the heap must be rebuilt from the DB; correctness requires the same dedup mechanism anyway — the sorted set approach eliminates the in-memory/Redis divergence |
 | One sorted set (no sharding) | A single sorted set is a hot key; multiple scheduler instances all `ZRANGEBYSCORE` the same key; Redis is single-threaded, so this becomes a bottleneck at high schedule counts |
+| Hash-based shard assignment (FNV-1a % N) | Distributes evenly in theory but cannot account for schedule density differences across tenants; all schedules with the same ID prefix land on the same shard. The routing sorted set approach uses actual schedule count as the assignment signal, producing better real-world balance and allowing tenants to be pinned to dedicated shards without touching the hash |
 | Kafka topic partitioned by shard | Adds Kafka as a dependency; sorted sets give equivalent sharding semantics without the operational overhead |
 
 ## Consequences
@@ -89,6 +100,6 @@ Cron expressions with sub-minute resolution (e.g., `*/30 * * * * *`) are not sup
 - Dedup lock prevents duplicate fires under any concurrent-scheduler scenario
 
 **Negative:**
-- Redis scheduler sorted sets must be bootstrapped on first deployment (handled by the reconciliation task on startup)
-- Shard rebalancing (changing `num_shards`) requires a coordinated reconciliation run; it is not zero-downtime if done carelessly
+- The routing sorted set must be bootstrapped on first deployment and kept in sync; the reconciliation task corrects drift every 2 minutes
+- Adding shards requires manually adding them to `sched:routing` (or restarting to pick up new config); this is a one-time operator step
 - The dedup lock has a 120-second TTL; in the unlikely scenario of a scheduler instance holding a lock for > 120 seconds (severe GC pause or hang), the next instance will fire — producing a duplicate delivery

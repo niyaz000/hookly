@@ -5,12 +5,7 @@ use axum::{
 };
 
 use crate::{
-    common::{
-        idempotency,
-        qs_query::QsQuery,
-        types::RequestContext,
-        ValidatedJson,
-    },
+    common::{idempotency, qs_query::QsQuery, types::RequestContext, ValidatedJson},
     error::AppError,
     features::{
         permissions::repository::PermissionRepository,
@@ -44,13 +39,9 @@ pub async fn create_tenant(
     if let Some(key) = idempotency::extract_key(&headers)? {
         let hash = idempotency::body_hash(&payload);
         let redis = state.redis.clone();
-        let tenant = idempotency::resolve(
-            &redis,
-            "tenants",
-            &key,
-            &hash,
-            move || async move { service(state).create(payload, ctx).await },
-        )
+        let tenant = idempotency::resolve(&redis, "tenants", &key, &hash, move || async move {
+            service(state).create(payload, ctx).await
+        })
         .await?;
         return Ok((StatusCode::CREATED, Json(tenant)));
     }

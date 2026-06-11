@@ -14,7 +14,7 @@ const SCHEDULE_SELECT: &str = r#"
         s.payload, s.cron_expression, s.timezone, s.status,
         s.next_run_at, s.last_run_at, s.last_run_status,
         s.created_by, s.updated_by, s.request_id, s.version,
-        s.created_at, s.updated_at, s.deleted_at,
+        s.created_at, s.updated_at, s.deleted_at, s.assigned_shard,
         et.public_id AS event_type_public_id,
         COALESCE(
             array_agg(e.public_id ORDER BY e.public_id) FILTER (WHERE e.id IS NOT NULL),
@@ -88,6 +88,19 @@ impl ScheduleRepository {
         Ok(rows.into_iter().map(|(id, _)| id).collect())
     }
 
+    pub async fn get_tenant_shard_affinity(
+        &self,
+        tenant_id: Uuid,
+    ) -> Result<Option<i16>, AppError> {
+        sqlx::query_scalar::<_, i16>(
+            "SELECT shard_id FROM tenant_shard_affinity WHERE tenant_id = $1",
+        )
+        .bind(tenant_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(AppError::from)
+    }
+
     pub async fn get_schedule_id_by_public_id(
         &self,
         public_id: &str,
@@ -127,6 +140,7 @@ impl ScheduleRepository {
         cron_expression: &str,
         timezone: &str,
         next_run_at: Option<DateTime<Utc>>,
+        assigned_shard: i16,
         ctx: RequestContext,
     ) -> Result<ScheduleRow, AppError> {
         let id = Uuid::now_v7();
@@ -142,13 +156,15 @@ impl ScheduleRepository {
                 id, public_id, name, description,
                 tenant_id, organization_id, event_type_id,
                 payload, cron_expression, timezone,
-                next_run_at, created_by, updated_by, request_id,
+                next_run_at, assigned_shard,
+                created_by, updated_by, request_id,
                 version, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4,
                 $5, $6, $7,
                 $8, $9, $10,
-                $11, $12, $12, $13,
+                $11, $12,
+                $13, $13, $14,
                 1, NOW(), NOW()
             )
             "#,
@@ -164,6 +180,7 @@ impl ScheduleRepository {
         .bind(cron_expression)
         .bind(timezone)
         .bind(next_run_at)
+        .bind(assigned_shard)
         .bind(ctx.created_by)
         .bind(ctx.request_id)
         .execute(&mut *tx)
@@ -269,10 +286,15 @@ impl ScheduleRepository {
         self.get_full_by_id(id).await
     }
 
-    pub async fn delete(&self, public_id: &str, ctx: RequestContext) -> Result<bool, AppError> {
+    // Returns (id, assigned_shard) of the deleted row, or None if not found.
+    pub async fn delete(
+        &self,
+        public_id: &str,
+        ctx: RequestContext,
+    ) -> Result<Option<(Uuid, i16)>, AppError> {
         debug!(public_id = %public_id, "soft deleting schedule");
 
-        let result = sqlx::query(
+        sqlx::query_as::<_, (Uuid, i16)>(
             r#"
             UPDATE schedules SET
                 deleted_at = NOW(),
@@ -281,15 +303,15 @@ impl ScheduleRepository {
                 version    = version + 1,
                 updated_at = NOW()
             WHERE public_id = $1 AND deleted_at IS NULL
+            RETURNING id, assigned_shard
             "#,
         )
         .bind(public_id)
         .bind(ctx.created_by)
         .bind(ctx.request_id)
-        .execute(&self.pool)
-        .await?;
-
-        Ok(result.rows_affected() > 0)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(AppError::from)
     }
 
     pub async fn restore(

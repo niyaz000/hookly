@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use cron::Schedule;
+use redis::AsyncCommands;
 use std::str::FromStr;
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -15,13 +16,31 @@ use super::{
     repository::ScheduleRepository,
 };
 
+// Atomically picks the member with the lowest score (fewest schedules) and increments it.
+// Returns the shard id as a string, or "-1" if the routing set is empty.
+const PICK_SHARD_LUA: &str = r#"
+local shard = redis.call('ZRANGE', KEYS[1], 0, 0)[1]
+if not shard then
+    return '-1'
+end
+redis.call('ZINCRBY', KEYS[1], 1, shard)
+return shard
+"#;
+
+const ROUTING_KEY: &str = "sched:routing";
+
+fn pending_key(shard: i16) -> String {
+    format!("sched:pending:{shard}")
+}
+
 pub struct ScheduleService {
     repo: ScheduleRepository,
+    redis: redis::Client,
 }
 
 impl ScheduleService {
-    pub fn new(repo: ScheduleRepository) -> Self {
-        Self { repo }
+    pub fn new(repo: ScheduleRepository, redis: redis::Client) -> Self {
+        Self { repo, redis }
     }
 
     #[tracing::instrument(skip(self, req, ctx), fields(name = %req.name))]
@@ -45,6 +64,8 @@ impl ScheduleService {
             .resolve_endpoints(&req.endpoint_ids, req.tenant_id)
             .await?;
 
+        let assigned_shard = self.pick_shard(req.tenant_id).await?;
+
         let row = self
             .repo
             .create(
@@ -58,11 +79,14 @@ impl ScheduleService {
                 &req.cron_expression,
                 timezone,
                 Some(next_run_at),
+                assigned_shard,
                 ctx,
             )
             .await?;
 
-        info!(public_id = %row.public_id, "schedule created");
+        self.zadd_pending(row.assigned_shard, row.id, next_run_at).await;
+
+        info!(public_id = %row.public_id, shard = row.assigned_shard, "schedule created");
         Ok(ScheduleResponse::from(row))
     }
 
@@ -98,20 +122,18 @@ impl ScheduleService {
                     warn!("schedule not found for update");
                     AppError::NotFound(format!("Schedule not found: {public_id}"))
                 })?;
-            Some(
-                self.repo
-                    .resolve_endpoints(ids, current.tenant_id)
-                    .await?,
-            )
+            Some(self.repo.resolve_endpoints(ids, current.tenant_id).await?)
         } else {
             None
         };
 
         // Recompute next_run_at only if cron_expression or timezone changed.
         let next_run_at = if req.cron_expression.is_some() || req.timezone.is_some() {
-            let current = self.repo.get_by_public_id(&public_id).await?.ok_or_else(|| {
-                AppError::NotFound(format!("Schedule not found: {public_id}"))
-            })?;
+            let current = self
+                .repo
+                .get_by_public_id(&public_id)
+                .await?
+                .ok_or_else(|| AppError::NotFound(format!("Schedule not found: {public_id}")))?;
             let expr = req
                 .cron_expression
                 .as_deref()
@@ -131,6 +153,11 @@ impl ScheduleService {
                 AppError::NotFound(format!("Schedule not found: {public_id}"))
             })?;
 
+        // If next_run_at changed, update the pending sorted set score.
+        if let Some(ts) = row.next_run_at {
+            self.zadd_pending(row.assigned_shard, row.id, ts).await;
+        }
+
         info!("schedule updated");
         Ok(ScheduleResponse::from(row))
     }
@@ -138,15 +165,20 @@ impl ScheduleService {
     #[tracing::instrument(skip(self, ctx))]
     pub async fn delete(&self, public_id: String, ctx: RequestContext) -> Result<(), AppError> {
         info!("deleting schedule");
-        let deleted = self.repo.delete(&public_id, ctx).await?;
-        if !deleted {
-            warn!("schedule not found for delete");
-            return Err(AppError::NotFound(format!(
-                "Schedule not found: {public_id}"
-            )));
+        match self.repo.delete(&public_id, ctx).await? {
+            None => {
+                warn!("schedule not found for delete");
+                Err(AppError::NotFound(format!(
+                    "Schedule not found: {public_id}"
+                )))
+            }
+            Some((id, shard)) => {
+                info!("schedule deleted");
+                self.zrem_pending(shard, id).await;
+                self.zincrby_routing(shard, -1).await;
+                Ok(())
+            }
         }
-        info!("schedule deleted");
-        Ok(())
     }
 
     #[tracing::instrument(skip(self, ctx))]
@@ -156,14 +188,16 @@ impl ScheduleService {
         ctx: RequestContext,
     ) -> Result<ScheduleResponse, AppError> {
         info!("restoring schedule");
-        let row = self
-            .repo
-            .restore(&public_id, ctx)
-            .await?
-            .ok_or_else(|| {
-                warn!("schedule not found for restore");
-                AppError::NotFound(format!("Schedule not found: {public_id}"))
-            })?;
+        let row = self.repo.restore(&public_id, ctx).await?.ok_or_else(|| {
+            warn!("schedule not found for restore");
+            AppError::NotFound(format!("Schedule not found: {public_id}"))
+        })?;
+
+        if let Some(ts) = row.next_run_at {
+            self.zadd_pending(row.assigned_shard, row.id, ts).await;
+        }
+        self.zincrby_routing(row.assigned_shard, 1).await;
+
         info!("schedule restored");
         Ok(ScheduleResponse::from(row))
     }
@@ -183,6 +217,8 @@ impl ScheduleService {
                 warn!("schedule not found for pause");
                 AppError::NotFound(format!("Schedule not found: {public_id}"))
             })?;
+        // Remove from pending set while paused; scheduler won't fire it.
+        self.zrem_pending(row.assigned_shard, row.id).await;
         info!("schedule paused");
         Ok(ScheduleResponse::from(row))
     }
@@ -202,6 +238,9 @@ impl ScheduleService {
                 warn!("schedule not found for resume");
                 AppError::NotFound(format!("Schedule not found: {public_id}"))
             })?;
+        if let Some(ts) = row.next_run_at {
+            self.zadd_pending(row.assigned_shard, row.id, ts).await;
+        }
         info!("schedule resumed");
         Ok(ScheduleResponse::from(row))
     }
@@ -306,6 +345,73 @@ impl ScheduleService {
             })
             .map(ScheduleExecutionResponse::from)
     }
+
+    // --- Shard assignment ---
+
+    async fn pick_shard(&self, tenant_id: Uuid) -> Result<i16, AppError> {
+        // Enterprise path: tenant has a dedicated shard.
+        if let Some(shard) = self.repo.get_tenant_shard_affinity(tenant_id).await? {
+            self.zincrby_routing(shard, 1).await;
+            return Ok(shard);
+        }
+
+        // Standard path: pick the lowest-score active shard from the routing sorted set.
+        let mut conn = self
+            .redis
+            .get_multiplexed_async_connection()
+            .await
+            .map_err(AppError::Redis)?;
+
+        let raw: String = redis::Script::new(PICK_SHARD_LUA)
+            .key(ROUTING_KEY)
+            .invoke_async(&mut conn)
+            .await
+            .map_err(AppError::Redis)?;
+
+        let shard = raw
+            .parse::<i16>()
+            .map_err(|_| AppError::Internal(format!("invalid shard id from routing set: {raw}")))?;
+
+        if shard < 0 {
+            return Err(AppError::Internal(
+                "no active scheduler shards configured".into(),
+            ));
+        }
+
+        Ok(shard)
+    }
+
+    // --- Best-effort Redis helpers ---
+    // These update Redis sorted sets after the DB write succeeds. Failures are
+    // logged and swallowed — the reconciliation task corrects drift every 2 min.
+
+    async fn zadd_pending(&self, shard: i16, schedule_id: Uuid, next_run_at: DateTime<Utc>) {
+        let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await else {
+            warn!(shard, "redis unavailable; skipping ZADD sched:pending");
+            return;
+        };
+        let score = next_run_at.timestamp() as f64;
+        let _: Result<(), _> = conn
+            .zadd(pending_key(shard), schedule_id.to_string(), score)
+            .await;
+    }
+
+    async fn zrem_pending(&self, shard: i16, schedule_id: Uuid) {
+        let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await else {
+            warn!(shard, "redis unavailable; skipping ZREM sched:pending");
+            return;
+        };
+        let _: Result<(), _> = conn
+            .zrem(pending_key(shard), schedule_id.to_string())
+            .await;
+    }
+
+    async fn zincrby_routing(&self, shard: i16, delta: i64) {
+        let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await else {
+            return;
+        };
+        let _: Result<(), _> = conn.zincr(ROUTING_KEY, shard.to_string(), delta).await;
+    }
 }
 
 // --- Cron helpers ---
@@ -321,10 +427,7 @@ fn normalize_cron(expr: &str) -> Result<String, AppError> {
     }
 }
 
-fn compute_next_run_at(
-    cron_expr: &str,
-    timezone: &str,
-) -> Result<chrono::DateTime<Utc>, AppError> {
+fn compute_next_run_at(cron_expr: &str, timezone: &str) -> Result<DateTime<Utc>, AppError> {
     let seven_field = normalize_cron(cron_expr)?;
 
     let schedule = Schedule::from_str(&seven_field)
@@ -338,9 +441,7 @@ fn compute_next_run_at(
         .upcoming(tz)
         .next()
         .map(|dt| dt.with_timezone(&Utc))
-        .ok_or_else(|| {
-            AppError::BadRequest("cron expression produces no future executions".into())
-        })
+        .ok_or_else(|| AppError::BadRequest("cron expression produces no future executions".into()))
 }
 
 fn encode_cursor(id: Uuid) -> String {

@@ -76,7 +76,7 @@ pub enum AppError {
     NotFound(String),
     BadRequest(String),
     Validation(Vec<FieldError>),
-    Conflict(String),
+    Conflict(String, Vec<FieldError>),
     Internal(String),
     Unauthorized(String),
     PayloadTooLarge,
@@ -94,7 +94,15 @@ impl IntoResponse for AppError {
                 StatusCode::UNPROCESSABLE_ENTITY,
                 ErrorBody::new("validation_error", "Request validation failed").with_errors(errs),
             ),
-            AppError::Conflict(msg) => (StatusCode::CONFLICT, ErrorBody::new("conflict", msg)),
+            AppError::Conflict(msg, errors) => {
+                let body = ErrorBody::new("conflict", msg);
+                let body = if errors.is_empty() {
+                    body
+                } else {
+                    body.with_errors(errors)
+                };
+                (StatusCode::CONFLICT, body)
+            }
             AppError::Database(e) => {
                 tracing::error!(error = %e, "database error");
                 (
@@ -116,16 +124,20 @@ impl IntoResponse for AppError {
                     ErrorBody::new("internal_error", "An internal error occurred"),
                 )
             }
-            AppError::Unauthorized(msg) => {
-                (StatusCode::UNAUTHORIZED, ErrorBody::new("unauthorized", msg))
-            }
+            AppError::Unauthorized(msg) => (
+                StatusCode::UNAUTHORIZED,
+                ErrorBody::new("unauthorized", msg),
+            ),
             AppError::PayloadTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
                 ErrorBody::new("payload_too_large", "Request body exceeds the 256 KB limit"),
             ),
             AppError::UriTooLong => (
                 StatusCode::URI_TOO_LONG,
-                ErrorBody::new("uri_too_long", "Request URI exceeds the 512 character limit"),
+                ErrorBody::new(
+                    "uri_too_long",
+                    "Request URI exceeds the 512 character limit",
+                ),
             ),
         };
 
@@ -138,8 +150,12 @@ impl From<sqlx::Error> for AppError {
         if let sqlx::Error::Database(ref db_err) = err {
             match db_err.code().as_deref() {
                 Some("23505") => {
-                    let msg = conflict_message(db_err.constraint(), db_err.table());
-                    return AppError::Conflict(msg);
+                    let pg_detail = db_err
+                        .try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+                        .and_then(|e| e.detail());
+                    let (msg, errors) =
+                        conflict_info(db_err.constraint(), db_err.table(), pg_detail);
+                    return AppError::Conflict(msg, errors);
                 }
                 Some("23503") => {
                     return AppError::BadRequest("Referenced resource does not exist".into());
@@ -151,24 +167,57 @@ impl From<sqlx::Error> for AppError {
     }
 }
 
-// Builds a human-readable conflict message from the constraint and table names.
 // Convention: `{table}_{field}_uq` or `idx_{table}_{field}`.
-fn conflict_message(constraint: Option<&str>, table: Option<&str>) -> String {
+fn conflict_info(
+    constraint: Option<&str>,
+    table: Option<&str>,
+    detail: Option<&str>,
+) -> (String, Vec<FieldError>) {
     let field = constraint.and_then(|c| {
         let c = c.strip_prefix("idx_").unwrap_or(c);
         let c = c.strip_suffix("_uq").unwrap_or(c);
         let c = if let Some(t) = table {
-            c.strip_prefix(t).and_then(|r| r.strip_prefix('_')).unwrap_or(c)
+            c.strip_prefix(t)
+                .and_then(|r| r.strip_prefix('_'))
+                .unwrap_or(c)
         } else {
             c
         };
-        if c.is_empty() { None } else { Some(c.replace('_', " ")) }
+        if c.is_empty() { None } else { Some(c.to_owned()) }
     });
 
-    match field {
-        Some(f) => format!("A resource with this {} already exists", f),
+    let message = match &field {
+        Some(f) => format!("A resource with this {} already exists", f.replace('_', " ")),
         None => "A resource with this value already exists".into(),
-    }
+    };
+
+    let errors = match field {
+        Some(f) => {
+            let fe = FieldError::new(
+                &f,
+                "conflict",
+                format!("A resource with this {} already exists", f.replace('_', " ")),
+            );
+            let fe = match parse_conflict_value(detail) {
+                Some(v) => fe.with_value(v),
+                None => fe,
+            };
+            vec![fe]
+        }
+        None => vec![],
+    };
+
+    (message, errors)
+}
+
+// Parses the conflicting value from a Postgres detail string.
+// Format: "Key (field)=(value) already exists."
+fn parse_conflict_value(detail: Option<&str>) -> Option<String> {
+    let detail = detail?;
+    let eq_pos = detail.find("=(")?;
+    let rest = &detail[eq_pos + 2..];
+    let end = rest.find(')')?;
+    Some(rest[..end].to_owned())
 }
 
 impl From<validator::ValidationErrors> for AppError {
@@ -179,11 +228,7 @@ impl From<validator::ValidationErrors> for AppError {
             .flat_map(|(field, errors)| {
                 errors.iter().map(move |e| {
                     let code = remap_validator_code(e);
-                    let message = e
-                        .message
-                        .as_deref()
-                        .unwrap_or(e.code.as_ref())
-                        .to_owned();
+                    let message = e.message.as_deref().unwrap_or(e.code.as_ref()).to_owned();
                     FieldError::new(field, code, message)
                 })
             })

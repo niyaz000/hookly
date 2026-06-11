@@ -1,7 +1,21 @@
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
+use opentelemetry::metrics::Counter;
+use opentelemetry::{global, KeyValue};
 use tracing::{info, warn};
 use uuid::Uuid;
+
+static EVENTS_COUNTER: OnceLock<Counter<u64>> = OnceLock::new();
+
+fn events_counter() -> &'static Counter<u64> {
+    EVENTS_COUNTER.get_or_init(|| {
+        global::meter("hookly.api")
+            .u64_counter("events_published_total")
+            .with_description("Total events successfully published")
+            .build()
+    })
+}
 
 use crate::common::types::{PaginatedResponse, RequestContext};
 use crate::error::AppError;
@@ -149,6 +163,10 @@ impl EventService {
             info!(public_id = %row.public_id, "event created");
             self.enqueue_delivery(row.id, ep.id, row.organization_id)
                 .await;
+            events_counter().add(1, &[
+                KeyValue::new("tenant_id", row.tenant_id.to_string()),
+                KeyValue::new("application_id", req.application_id.clone()),
+            ]);
         } else {
             info!(public_id = %row.public_id, "idempotent replay, returning existing event");
         }

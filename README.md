@@ -14,6 +14,42 @@ Hookly exposes a REST API that lets platform operators and tenants:
 - **Issue and rotate credentials** — API keys with environment scoping, and JWT signing keys (RS256/ES256/ES384) with rotation grace periods
 - **Observe platform changes** — a system-defined catalog of 27 platform event types that tenants can subscribe to, delivered via dedicated platform webhooks
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Clients                                                         │
+│  (API consumers, dashboards)                                     │
+└────────────────────┬────────────────────────────────────────────┘
+                     │  HTTPS / Bearer token (API key)
+                     ▼
+┌────────────────────────────────────┐
+│  hookly  (API server)              │
+│  Axum 0.7 · Tokio                  │
+│  Auth · RBAC · Idempotency         │
+└──────┬─────────────────────────────┘
+       │  INSERT events + delivery_jobs
+       │  XADD Redis Stream (best-effort)
+       ▼
+┌──────────────────────┐      ┌─────────────────────────────────┐
+│  PostgreSQL          │◄─────│  hookly-worker                  │
+│  (source of truth)   │      │  XREADGROUP · HMAC-SHA256 sign  │
+│  events              │      │  HTTP delivery · retry backoff  │
+│  delivery_jobs       │      │  XAUTOCLAIM recovery            │
+│  delivery_attempts   │      │  Outbox poller                  │
+└──────────────────────┘      └──────────────┬──────────────────┘
+       ▲                                      │
+       │  Fire: INSERT events                 │  XADD
+       │         + delivery_jobs              ▼
+┌──────┴───────────────────┐   ┌─────────────────────────────────┐
+│  hookly-scheduler        │   │  Redis Streams                  │
+│  Shard ownership (NX)    │   │  hookly:q:tier:{tier}           │
+│  ZRANGEBYSCORE tick      │   │  hookly:q:org:{org_id}          │
+│  Fire locks (NX)         │   └─────────────────────────────────┘
+│  Reconciliation (2 min)  │
+└──────────────────────────┘
+```
+
 ## Tech stack
 
 | Layer | Choice |
@@ -24,39 +60,53 @@ Hookly exposes a REST API that lets platform operators and tenants:
 | Queue | Redis Streams |
 | IDs | UUIDv7 (time-ordered) + NanoId prefixed public IDs |
 | Encryption | AES-256-GCM (per-tenant derived keys) |
-| Signing | HMAC-SHA256 for webhook payloads |
+| Signing | HMAC-SHA256 for webhook payloads (Svix-compatible) |
 | JWT key types | RS256, ES256, ES384 |
 | Async runtime | Tokio |
+| Observability | tracing + OpenTelemetry (OTLP/gRPC, opt-in) |
 
 ## Key design choices
 
-- **No FK constraints** — referential integrity enforced at the application layer; enables cross-shard flexibility and simpler migrations
-- **Cursor pagination** — all list endpoints use opaque cursor tokens rather than `OFFSET`, safe for high-cardinality tables
-- **Two binaries** — `hookly` (API server) and `worker` (delivery processor) run independently and scale separately
-- **Encrypted secrets at rest** — API key hashes and webhook signing secrets are encrypted under a per-tenant AES-256-GCM derived key
+- **Three binaries, independently scalable** — `hookly` (API), `worker` (delivery), `scheduler` (cron)
+- **Outbox pattern** — delivery jobs survive Redis restarts; PostgreSQL is the durable source
+- **Per-tenant encryption** — AES-256-GCM keys derived per tenant from a single master key
+- **Circuit breaker** — per-endpoint state machine prevents a broken target from consuming worker capacity
+- **Cursor pagination** — all list endpoints use opaque cursor tokens; safe at any table scale
+- **No FK constraints** — referential integrity at the application layer; enables soft deletes and future sharding
+- **API key auth** — all routes protected by bearer-token API keys; verify/accept invite flows are intentionally public
 
 ## Quick start
 
-**Prerequisites:** Rust, PostgreSQL, Redis, `sqlx-cli`
+**With Docker Compose (recommended):**
 
 ```bash
-# Install sqlx CLI
-make install
+cp .env.example .env        # fill in CRYPTO_MASTER_KEY and CRYPTO_API_KEY_ENCRYPTION_KEY
+docker compose up -d        # starts PostgreSQL, Redis, hookly, worker, scheduler
+```
 
-# Configure environment
-cp .env.example .env   # fill in DATABASE_URL, REDIS_URL, CRYPTO_MASTER_KEY, etc.
+**From source:**
 
-# Run migrations
-make migrate
+```bash
+# Prerequisites: Rust, PostgreSQL, Redis, sqlx-cli
+make install   # installs sqlx-cli
 
-# Start the API server
-make run
+cp .env.example .env        # configure DATABASE_URL, REDIS_URL, CRYPTO_* keys
+make migrate                # run all migrations
 
-# In another terminal, start the delivery worker
-cargo run --bin worker
+make run                    # API server on :3000
+cargo run --bin worker      # delivery worker
+cargo run --bin scheduler   # cron scheduler
 ```
 
 The API is available at `http://localhost:3000/api/v1`. Health check: `GET /api/health`.
+
+**Optional — export telemetry (Jaeger, Grafana OTLP):**
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
+OTEL_SERVICE_NAME=hookly \
+cargo run --bin hookly
+```
 
 ## Documentation
 

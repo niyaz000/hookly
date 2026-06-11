@@ -6,3 +6,4 @@ pub mod features;
 pub mod queue;
 pub mod router;
 pub mod state;
+pub mod telemetry;

@@ -12,6 +12,7 @@
 - [Data model](architecture/data-model.md) — schema by domain with design notes
 - [Delivery pipeline](architecture/delivery-pipeline.md) — event emission → Redis queue → endpoint delivery
 - [Scheduled event flow](architecture/scheduled-event-flow.md) — shard ownership, multi-instance tick coordination, outbox write analysis
+- [Scheduler sharding](architecture/scheduler-sharding.md) — shard assignment, tenant affinity, multi-Redis topology, scale-up and drain protocol
 - [Idempotency](architecture/idempotency.md) — body hashing, Redis storage layout, lock protocol, failure semantics
 
 ### Features

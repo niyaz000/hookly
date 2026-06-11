@@ -25,7 +25,7 @@ use crate::{
 };
 
 fn service(state: AppState) -> ScheduleService {
-    ScheduleService::new(ScheduleRepository::new(state.db))
+    ScheduleService::new(ScheduleRepository::new(state.db), state.redis)
 }
 
 pub async fn create_schedule(

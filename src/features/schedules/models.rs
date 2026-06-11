@@ -33,6 +33,7 @@ pub struct ScheduleRow {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub assigned_shard: i16,
     pub event_type_public_id: String,
     pub endpoint_public_ids: Vec<String>,
 }

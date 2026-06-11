@@ -6,6 +6,14 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub redis: RedisConfig,
     pub crypto: CryptoConfig,
+    pub otel: OtelConfig,
+}
+
+/// Optional OpenTelemetry export. Disabled when OTEL_EXPORTER_OTLP_ENDPOINT is unset.
+#[derive(Deserialize, Clone, Default)]
+pub struct OtelConfig {
+    pub exporter_otlp_endpoint: Option<String>,
+    pub service_name: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -39,6 +47,7 @@ impl Config {
             database: envy::prefixed("DATABASE_").from_env()?,
             redis: envy::prefixed("REDIS_").from_env()?,
             crypto: envy::prefixed("CRYPTO_").from_env()?,
+            otel: envy::prefixed("OTEL_").from_env().unwrap_or_default(),
         })
     }
 }

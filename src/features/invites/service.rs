@@ -267,7 +267,7 @@ impl InviteService {
             return Err(AppError::BadRequest("invite has expired".into()));
         }
         if row.status == "accepted" {
-            return Err(AppError::Conflict("invite has already been accepted".into()));
+            return Err(AppError::Conflict("invite has already been accepted".into(), vec![]));
         }
         if matches!(row.status.as_str(), "revoked") {
             return Err(AppError::BadRequest("invite has been revoked".into()));

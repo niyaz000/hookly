@@ -28,9 +28,14 @@ impl OrganizationService {
         ctx: RequestContext,
     ) -> Result<OrganizationResponse, AppError> {
         req.validate()?;
-        info!("creating organization with name and slug");
+        info!(
+            org_name = %req.name,
+            org_slug = %req.slug,
+            "creating organization with name={} and slug={}",
+            req.name, req.slug
+        );
         let org = self.repo.create(req, ctx).await?;
-        info!(public_id = %org.public_id, "organization created");
+        info!(public_id = %org.public_id, "organization created with public_id={}", org.public_id);
         Ok(OrganizationResponse::from(org))
     }
 
@@ -39,12 +44,11 @@ impl OrganizationService {
         &self,
         public_id: String,
     ) -> Result<OrganizationResponse, AppError> {
-        info!("fetching organization");
         self.repo
             .get_by_public_id(&public_id)
             .await?
             .ok_or_else(|| {
-                warn!("organization not found");
+                info!(public_id = %public_id, "Could not find organization with public_id = {}", public_id);
                 AppError::NotFound(format!("Organization not found: {public_id}"))
             })
             .map(OrganizationResponse::from)

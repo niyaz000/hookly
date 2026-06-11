@@ -214,6 +214,7 @@ impl EndpointService {
                     warn!("endpoint version conflict");
                     Err(AppError::Conflict(
                         "version mismatch — fetch the latest version and retry".into(),
+                        vec![],
                     ))
                 }
             }
