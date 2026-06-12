@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -81,6 +82,7 @@ impl DeliveryRepository {
                 dj.endpoint_id,
                 dj.organization_id,
                 dj.attempt,
+                dj.max_attempts,
                 ev.public_id      AS event_public_id,
                 ev.payload,
                 ev.tenant_id,
@@ -165,6 +167,31 @@ impl DeliveryRepository {
         Ok(())
     }
 
+    /// Schedules a retry by setting status='retrying', recording when to next
+    /// attempt, and clearing enqueued_at so the outbox poller re-enqueues the
+    /// job once retry_after has passed.
+    #[allow(dead_code)]
+    pub async fn schedule_retry(
+        &self,
+        job_id: Uuid,
+        retry_after: DateTime<Utc>,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            r#"UPDATE delivery_jobs
+               SET status      = 'retrying',
+                   attempt     = attempt + 1,
+                   retry_after = $2,
+                   enqueued_at = NULL
+               WHERE id = $1"#,
+        )
+        .bind(job_id)
+        .bind(retry_after)
+        .execute(&self.db)
+        .await
+        .map_err(AppError::from)?;
+        Ok(())
+    }
+
     // --- Retry ---
 
     /// Resets a failed delivery job back to pending for re-delivery.
@@ -200,16 +227,23 @@ impl DeliveryRepository {
 
     // --- Outbox poller ---
 
-    /// Returns pending jobs that have never been XADD'd to Redis (enqueued_at IS NULL)
-    /// and are at least 5 seconds old (give the primary path time to succeed first).
+    /// Returns jobs that need to be (re-)enqueued into Redis:
+    /// - New pending jobs that never made it into the stream (XADD failure safety net).
+    /// - Retrying jobs whose retry_after timestamp has passed.
     #[allow(dead_code)]
     pub async fn list_unqueued(&self, limit: i64) -> Result<Vec<UnqueuedJob>, AppError> {
         sqlx::query_as::<_, UnqueuedJob>(
             r#"SELECT id, public_id, stream_name
                FROM delivery_jobs
-               WHERE status = 'pending'
-                 AND enqueued_at IS NULL
-                 AND created_at < NOW() - INTERVAL '5 seconds'
+               WHERE (
+                   status = 'pending'
+                   AND enqueued_at IS NULL
+                   AND created_at < NOW() - INTERVAL '5 seconds'
+               ) OR (
+                   status = 'retrying'
+                   AND retry_after <= NOW()
+                   AND enqueued_at IS NULL
+               )
                ORDER BY created_at
                LIMIT $1"#,
         )

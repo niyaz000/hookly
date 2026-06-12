@@ -1,3 +1,4 @@
+use chrono::Utc;
 use sqlx::PgPool;
 use tokio::sync::watch;
 use tracing::{error, info, warn};
@@ -148,15 +149,34 @@ pub async fn process_one(
         }
         info!(job_public_id = %job.job_public_id, "delivered successfully");
     } else {
-        if let Err(e) = delivery_repo.fail_job(job.job_id).await {
-            error!(job_public_id = %job.job_public_id, "fail_job failed: {e:?}");
+        // attempt is the 0-based index of the attempt just made.
+        // next_attempt is what it will be after incrementing.
+        let next_attempt = job.attempt + 1;
+        if next_attempt < job.max_attempts {
+            // Exponential backoff: 30s, 60s, 120s, 240s, … capped at 1 hour.
+            let backoff_secs = (30u64 * 2u64.pow(job.attempt as u32)).min(3600);
+            let retry_after = Utc::now() + chrono::Duration::seconds(backoff_secs as i64);
+            warn!(
+                job_public_id = %job.job_public_id,
+                attempt = next_attempt,
+                max_attempts = job.max_attempts,
+                retry_after = %retry_after,
+                "delivery failed, scheduled for retry"
+            );
+            if let Err(e) = delivery_repo.schedule_retry(job.job_id, retry_after).await {
+                error!(job_public_id = %job.job_public_id, "schedule_retry failed: {e:?}");
+            }
+        } else {
+            warn!(
+                job_public_id = %job.job_public_id,
+                attempt = next_attempt,
+                max_attempts = job.max_attempts,
+                "delivery failed, max attempts reached"
+            );
+            if let Err(e) = delivery_repo.fail_job(job.job_id).await {
+                error!(job_public_id = %job.job_public_id, "fail_job failed: {e:?}");
+            }
         }
-        warn!(
-            job_public_id = %job.job_public_id,
-            status = result.status.as_str(),
-            http_status = ?result.http_status,
-            "delivery failed"
-        );
     }
 
     queue::xack(redis, stream, msg_id).await.ok();
