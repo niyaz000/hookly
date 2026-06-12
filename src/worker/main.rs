@@ -1,6 +1,8 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use dotenvy::dotenv;
+use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 use tracing::info;
 
@@ -9,6 +11,8 @@ mod consumer;
 mod deliver;
 mod outbox;
 mod reclaim;
+mod stream_watcher;
+mod trim;
 
 #[tokio::main]
 async fn main() {
@@ -31,10 +35,14 @@ async fn main() {
         .build()
         .expect("Failed to create HTTP client");
 
-    // Ensure consumer groups exist for every stream this worker will consume.
-    // Enterprise streams use "0-0" so the worker reads any messages that were
-    // enqueued before this deployment; shared tier streams use "$" since prior
-    // messages were handled by other workers already in the consumer group.
+    // Shared, mutable stream list. Workers, reclaim, and watcher all hold a
+    // clone of this Arc. The stream-watcher appends new streams; workers read
+    // it at the top of each XREADGROUP iteration.
+    let streams: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(worker_cfg.streams.clone()));
+
+    // Ensure consumer groups exist for the initial set of streams.
+    // Enterprise streams use "0-0" so a newly-deployed worker catches up on
+    // any messages that were enqueued before it started.
     for stream in &worker_cfg.streams {
         let start_id = if stream.contains(":org:") { "0-0" } else { "$" };
         hookly::queue::ensure_consumer_group(&redis, stream, start_id)
@@ -47,21 +55,12 @@ async fn main() {
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let mut set = JoinSet::new();
 
-    for stream in &worker_cfg.streams {
-        // Primary consumer
+    // N concurrent workers, each consuming from ALL streams in one XREADGROUP
+    // call. Redis load-balances messages across them automatically.
+    for worker_id in 0..worker_cfg.num_workers {
         set.spawn(consumer::run(
-            stream.clone(),
-            worker_cfg.clone(),
-            db.clone(),
-            redis.clone(),
-            crypto.clone(),
-            http.clone(),
-            shutdown_rx.clone(),
-        ));
-
-        // XAUTOCLAIM reclaim task (one per stream)
-        set.spawn(reclaim::run(
-            stream.clone(),
+            worker_id,
+            Arc::clone(&streams),
             worker_cfg.clone(),
             db.clone(),
             redis.clone(),
@@ -71,7 +70,36 @@ async fn main() {
         ));
     }
 
-    // Outbox poller (one per worker instance, not per stream)
+    // One reclaim task iterates over the full shared stream list each tick.
+    set.spawn(reclaim::run(
+        Arc::clone(&streams),
+        worker_cfg.clone(),
+        db.clone(),
+        redis.clone(),
+        crypto.clone(),
+        http.clone(),
+        shutdown_rx.clone(),
+    ));
+
+    // Auto-discovery: scans Redis every WORKER_STREAM_WATCH_INTERVAL_SECS and
+    // adds any new streams (e.g. a new enterprise org) to the shared list.
+    set.spawn(stream_watcher::run(
+        Arc::clone(&streams),
+        redis.clone(),
+        worker_cfg.stream_watch_interval_secs,
+        shutdown_rx.clone(),
+    ));
+
+    // Safe trimming: XTRIM MINID on each stream every WORKER_TRIM_INTERVAL_SECS.
+    set.spawn(trim::run(
+        Arc::clone(&streams),
+        redis.clone(),
+        worker_cfg.trim_interval_secs,
+        shutdown_rx.clone(),
+    ));
+
+    // Outbox poller: re-enqueues jobs where XADD failed (enqueued_at IS NULL)
+    // and retrying jobs whose retry_after has passed.
     set.spawn(outbox::run(
         worker_cfg.clone(),
         db.clone(),
@@ -81,6 +109,7 @@ async fn main() {
 
     info!(
         streams = ?worker_cfg.streams,
+        workers = worker_cfg.num_workers,
         consumer = %worker_cfg.consumer_name,
         "worker started"
     );

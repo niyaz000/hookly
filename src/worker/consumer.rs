@@ -1,6 +1,9 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use chrono::Utc;
 use sqlx::PgPool;
-use tokio::sync::watch;
+use tokio::sync::{RwLock, watch};
 use tracing::{error, info, warn};
 
 use hookly::common::TenantCrypto;
@@ -9,12 +12,21 @@ use hookly::queue;
 
 use crate::deliver;
 
-/// Runs a blocking XREADGROUP loop for a single stream until shutdown.
+/// Runs a single worker task with fair round-robin scheduling across streams.
 ///
-/// Messages are processed one batch at a time. The BLOCK timeout (5 s by
-/// default) lets the loop wake up periodically to check the shutdown flag.
+/// Each iteration reads one stream non-blocking and then advances to the next.
+/// A stream with a large backlog never starves other streams: every stream gets
+/// one turn per rotation regardless of how many messages it holds.
+///
+/// Sleep behaviour: workers only pause when a full rotation (all streams)
+/// returns empty, keeping latency low under load while avoiding a busy-loop at
+/// idle. `WORKER_POLL_INTERVAL_MS` (default 250 ms) controls the idle sleep.
+///
+/// Staggered start: `worker_id` sets the initial stream index so N workers
+/// spread their first reads across N different streams.
 pub async fn run(
-    stream: String,
+    worker_id: usize,
+    streams: Arc<RwLock<Vec<String>>>,
     config: crate::config::WorkerConfig,
     db: PgPool,
     redis: redis::Client,
@@ -22,17 +34,66 @@ pub async fn run(
     http: reqwest::Client,
     shutdown_rx: watch::Receiver<bool>,
 ) {
+    let consumer_name = format!("{}-w{}", config.consumer_name, worker_id);
     let delivery_repo = DeliveryRepository::new(db);
-    info!(stream = %stream, consumer = %config.consumer_name, "consumer started");
+    info!(worker_id, consumer = %consumer_name, "consumer started");
+
+    // Each worker starts at a different stream to spread the first-read load.
+    let mut stream_idx = worker_id;
+    // Counts consecutive empty reads. Once it reaches the number of streams in
+    // a rotation, we know the whole list was empty and sleep before retrying.
+    let mut empty_streak: usize = 0;
 
     loop {
         if *shutdown_rx.borrow() {
             break;
         }
 
-        let messages = xreadgroup(&redis, &stream, &config).await;
+        let current = streams.read().await.clone();
+        let n = current.len();
+
+        if n == 0 {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            continue;
+        }
+
+        // Wrap index safely when the streams list grows or shrinks.
+        stream_idx %= n;
+        let stream = current[stream_idx].clone();
+
+        // Always advance before processing so a panic in process_one doesn't
+        // pin the worker on the same stream indefinitely.
+        stream_idx = (stream_idx + 1) % n;
+
+        let messages = queue::xreadgroup_single(
+            &redis,
+            &stream,
+            &consumer_name,
+            config.batch_size,
+        )
+        .await;
+
+        if messages.is_empty() {
+            empty_streak += 1;
+            // After one full rotation with no messages, sleep to avoid hammering
+            // Redis and wasting CPU. Reset the streak after sleeping.
+            if empty_streak >= n {
+                tokio::time::sleep(Duration::from_millis(config.poll_interval_ms)).await;
+                empty_streak = 0;
+                if *shutdown_rx.borrow() {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        // Got messages from this stream — reset the idle counter and process.
+        empty_streak = 0;
 
         for (msg_id, job_pub_id) in messages {
+            if *shutdown_rx.borrow() {
+                break;
+            }
             process_one(
                 &msg_id,
                 &job_pub_id,
@@ -45,51 +106,12 @@ pub async fn run(
             .await;
         }
 
-        // Yield briefly so the shutdown check can fire without waiting a full block period.
         if *shutdown_rx.borrow() {
             break;
         }
     }
 
-    info!(stream = %stream, consumer = %config.consumer_name, "consumer stopped");
-}
-
-/// Reads up to `batch_size` messages, blocking for at most `block_ms`.
-async fn xreadgroup(
-    redis: &redis::Client,
-    stream: &str,
-    config: &crate::config::WorkerConfig,
-) -> Vec<(String, String)> {
-    let mut conn = match redis.get_multiplexed_async_connection().await {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("xreadgroup: failed to connect: {e}");
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            return vec![];
-        }
-    };
-
-    let val: redis::RedisResult<redis::Value> = redis::cmd("XREADGROUP")
-        .arg("GROUP")
-        .arg(queue::GROUP)
-        .arg(&config.consumer_name)
-        .arg("COUNT")
-        .arg(config.batch_size)
-        .arg("BLOCK")
-        .arg(config.block_ms)
-        .arg("STREAMS")
-        .arg(stream)
-        .arg(">") // only new, undelivered messages
-        .query_async(&mut conn)
-        .await;
-
-    match val {
-        Ok(v) => queue::parse_xread_reply(v),
-        Err(e) => {
-            warn!("xreadgroup error on {stream}: {e}");
-            vec![]
-        }
-    }
+    info!(worker_id, "consumer stopped");
 }
 
 /// Processes a single message end-to-end: fetch → deliver → record → XACK.
@@ -149,8 +171,6 @@ pub async fn process_one(
         }
         info!(job_public_id = %job.job_public_id, "delivered successfully");
     } else {
-        // attempt is the 0-based index of the attempt just made.
-        // next_attempt is what it will be after incrementing.
         let next_attempt = job.attempt + 1;
         if next_attempt < job.max_attempts {
             // Exponential backoff: 30s, 60s, 120s, 240s, … capped at 1 hour.

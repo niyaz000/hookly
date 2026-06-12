@@ -11,7 +11,7 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::common::{access_log, types::RequestContext};
-use crate::error::{AppError, REQUEST_ID};
+use crate::error::{AppError, REQUEST_ID, REQUEST_PATH};
 use crate::features::{
     api_keys, applications, assignments, delivery, endpoints, environments, event_types, events,
     invites, jwt_keys, organizations, permissions, platform_event_types, platform_subscriptions,
@@ -95,8 +95,12 @@ async fn check_body_size(req: Request, next: Next) -> Response {
 
 async fn set_request_id(req: Request, next: Next) -> Response {
     let id = Uuid::now_v7();
+    let path = req.uri().path().to_owned();
     let span = tracing::info_span!("http_request", request_id = %id);
-    let mut response = REQUEST_ID.scope(id, next.run(req)).instrument(span).await;
+    let mut response = REQUEST_ID
+        .scope(id, REQUEST_PATH.scope(path, next.run(req)))
+        .instrument(span)
+        .await;
     // Safety: UUID is always valid ASCII
     let val = HeaderValue::from_str(&id.to_string()).expect("uuid is valid header value");
     response

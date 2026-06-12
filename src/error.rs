@@ -3,11 +3,13 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use chrono::Utc;
 use serde::Serialize;
 use uuid::Uuid;
 
 tokio::task_local! {
     pub static REQUEST_ID: Uuid;
+    pub static REQUEST_PATH: String;
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -47,6 +49,8 @@ struct ErrorBody {
     errors: Option<Vec<FieldError>>,
     request_id: String,
     doc_url: String,
+    timestamp: String,
+    path: String,
 }
 
 impl ErrorBody {
@@ -54,12 +58,17 @@ impl ErrorBody {
         let request_id = REQUEST_ID
             .try_with(|id| id.to_string())
             .unwrap_or_else(|_| Uuid::new_v4().to_string());
+        let path = REQUEST_PATH
+            .try_with(|p| p.clone())
+            .unwrap_or_default();
         Self {
             error_code: error_code.to_owned(),
             error_message: error_message.into(),
             errors: None,
             request_id,
             doc_url: format!("https://docs.hookly.dev/errors/{error_code}"),
+            timestamp: Utc::now().to_rfc3339(),
+            path,
         }
     }
 

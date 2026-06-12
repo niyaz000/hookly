@@ -1,7 +1,7 @@
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::common::types::RequestContext;
+use crate::common::{types::RequestContext, validators};
 use crate::error::AppError;
 
 use super::models::{
@@ -26,6 +26,7 @@ impl EnvironmentService {
         ctx: RequestContext,
     ) -> Result<Environment, AppError> {
         info!("creating environment");
+        if let Some(t) = &req.tags { validators::validate_tags(t)?; }
 
         let tags = serde_json::to_value(req.tags.unwrap_or_default())
             .unwrap_or(serde_json::Value::Object(Default::default()));
@@ -79,6 +80,7 @@ impl EnvironmentService {
         ctx: RequestContext,
     ) -> Result<Environment, AppError> {
         info!("updating environment");
+        if let Some(t) = &req.tags { validators::validate_tags(t)?; }
 
         let tags = serde_json::to_value(req.tags.unwrap_or_default())
             .unwrap_or(serde_json::Value::Object(Default::default()));

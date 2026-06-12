@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use opentelemetry::metrics::Counter;
@@ -17,7 +16,7 @@ fn events_counter() -> &'static Counter<u64> {
     })
 }
 
-use crate::common::types::{PaginatedResponse, RequestContext};
+use crate::common::{types::{PaginatedResponse, RequestContext}, validators};
 use crate::error::AppError;
 use crate::features::delivery::repository::DeliveryRepository;
 use crate::features::events::models::{CreateEventRequest, EventResponse, ListQueryParams};
@@ -46,21 +45,6 @@ impl EventService {
         let size = serde_json::to_string(payload).map(|s| s.len()).unwrap_or(0);
         if size > 512 * 1024 {
             return Err(AppError::BadRequest("payload exceeds 512 KB limit".into()));
-        }
-        Ok(())
-    }
-
-    fn validate_tags(tags: &HashMap<String, String>) -> Result<(), AppError> {
-        if tags.len() > 20 {
-            return Err(AppError::BadRequest("tags: max 20 entries".into()));
-        }
-        for (k, v) in tags {
-            if k.len() > 128 {
-                return Err(AppError::BadRequest("tags: key exceeds 128 chars".into()));
-            }
-            if v.len() > 256 {
-                return Err(AppError::BadRequest("tags: value exceeds 256 chars".into()));
-            }
         }
         Ok(())
     }
@@ -103,7 +87,7 @@ impl EventService {
         ctx: RequestContext,
     ) -> Result<(EventResponse, bool), AppError> {
         Self::validate_payload(&req.payload)?;
-        Self::validate_tags(&req.tags)?;
+        validators::validate_tags(&req.tags)?;
         if let Some(k) = &req.idempotency_key {
             if k.is_empty() || k.len() > 256 {
                 return Err(AppError::BadRequest(

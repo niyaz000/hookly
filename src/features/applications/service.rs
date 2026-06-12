@@ -1,6 +1,6 @@
 use tracing::{info, warn};
 
-use crate::common::types::RequestContext;
+use crate::common::{types::RequestContext, validators};
 use crate::error::AppError;
 use crate::features::applications::models::{
     Application, CreateApplicationRequest, GetApplicationResponse,
@@ -23,6 +23,7 @@ impl ApplicationService {
         ctx: RequestContext,
     ) -> Result<Application, AppError> {
         info!("creating application");
+        validators::validate_tags(&req.tags)?;
 
         let (tenant_id, organization_id) = self
             .repo

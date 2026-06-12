@@ -4,7 +4,8 @@ use uuid::Uuid;
 
 use crate::features::permissions::repository::PermissionRepository;
 use crate::features::roles::repository::RoleRepository;
-use crate::{common::types::RequestContext, error::AppError};
+use crate::common::{types::RequestContext, validators};
+use crate::error::AppError;
 
 use super::{
     models::{
@@ -40,6 +41,7 @@ impl TenantService {
         ctx: RequestContext,
     ) -> Result<TenantResponse, AppError> {
         req.validate()?;
+        if let Some(t) = &req.tags { validators::validate_tags(t)?; }
 
         let organization_id = self
             .repo
@@ -88,6 +90,7 @@ impl TenantService {
         ctx: RequestContext,
     ) -> Result<TenantResponse, AppError> {
         req.validate()?;
+        if let Some(t) = &req.tags { validators::validate_tags(t)?; }
         info!("updating tenant");
         let tenant = self
             .repo

@@ -1,11 +1,7 @@
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{
-    metrics::SdkMeterProvider,
-    trace::SdkTracerProvider,
-    Resource,
-};
+use opentelemetry_sdk::{metrics::SdkMeterProvider, trace::SdkTracerProvider, Resource};
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -49,7 +45,10 @@ pub fn init(config: &Config) -> OtelGuard {
             .with(env_filter)
             .with(fmt_layer)
             .init();
-        return OtelGuard { tracer_provider: None, meter_provider: None };
+        return OtelGuard {
+            tracer_provider: None,
+            meter_provider: None,
+        };
     };
 
     let service_name = config
@@ -77,7 +76,10 @@ pub fn init(config: &Config) -> OtelGuard {
                 .with(env_filter)
                 .with(fmt_layer)
                 .init();
-            return OtelGuard { tracer_provider: None, meter_provider: None };
+            return OtelGuard {
+                tracer_provider: None,
+                meter_provider: None,
+            };
         }
     };
 
@@ -93,9 +95,8 @@ pub fn init(config: &Config) -> OtelGuard {
         }
     };
 
-    let otel_layer = tracing_opentelemetry::OpenTelemetryLayer::new(
-        tracer_provider.tracer("hookly"),
-    );
+    let otel_layer =
+        tracing_opentelemetry::OpenTelemetryLayer::new(tracer_provider.tracer("hookly"));
 
     tracing_subscriber::registry()
         .with(env_filter)
@@ -135,8 +136,7 @@ fn build_meter_provider(
         .build()
         .map_err(|e| opentelemetry_sdk::error::OTelSdkError::InternalFailure(e.to_string()))?;
 
-    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter)
-        .build();
+    let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(exporter).build();
 
     Ok(SdkMeterProvider::builder()
         .with_resource(resource)

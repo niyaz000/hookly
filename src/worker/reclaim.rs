@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use sqlx::PgPool;
-use tokio::sync::watch;
+use tokio::sync::{RwLock, watch};
 use tracing::info;
 
 use hookly::common::TenantCrypto;
@@ -8,13 +10,11 @@ use hookly::queue;
 
 use crate::consumer;
 
-/// Periodically runs XAUTOCLAIM to recover messages that were assigned to a
-/// crashed or slow consumer and have been idle beyond `reclaim_idle_ms`.
-///
-/// Reclaimed messages are processed immediately using the same logic as the
-/// primary consumer, then XACKed.
+/// Periodically runs XAUTOCLAIM across all streams to recover messages that
+/// were assigned to a crashed or slow consumer and have been idle beyond
+/// `reclaim_idle_ms`. Reclaimed messages are processed immediately.
 pub async fn run(
-    stream: String,
+    streams: Arc<RwLock<Vec<String>>>,
     config: crate::config::WorkerConfig,
     db: PgPool,
     redis: redis::Client,
@@ -38,29 +38,32 @@ pub async fn run(
             break;
         }
 
-        let claimed = queue::xautoclaim(
-            &redis,
-            &stream,
-            &config.consumer_name,
-            config.reclaim_idle_ms,
-        )
-        .await;
-
-        if !claimed.is_empty() {
-            info!(stream = %stream, count = claimed.len(), "reclaiming idle messages");
-        }
-
-        for (msg_id, job_pub_id) in claimed {
-            consumer::process_one(
-                &msg_id,
-                &job_pub_id,
-                &stream,
-                &delivery_repo,
-                &crypto,
-                &http,
+        let current_streams = streams.read().await.clone();
+        for stream in &current_streams {
+            let claimed = queue::xautoclaim(
                 &redis,
+                stream,
+                &config.consumer_name,
+                config.reclaim_idle_ms,
             )
             .await;
+
+            if !claimed.is_empty() {
+                info!(stream = %stream, count = claimed.len(), "reclaiming idle messages");
+            }
+
+            for (msg_id, job_pub_id) in claimed {
+                consumer::process_one(
+                    &msg_id,
+                    &job_pub_id,
+                    stream,
+                    &delivery_repo,
+                    &crypto,
+                    &http,
+                    &redis,
+                )
+                .await;
+            }
         }
     }
 }

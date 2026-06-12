@@ -1,5 +1,9 @@
+use std::collections::HashMap;
+
 use chrono::Utc;
 use validator::ValidationError;
+
+use crate::error::AppError;
 
 pub fn validate_not_blank(s: &str) -> Result<(), ValidationError> {
     if s.trim().is_empty() {
@@ -22,6 +26,25 @@ pub fn validate_slug(s: &str) -> Result<(), ValidationError> {
 pub fn validate_future_date(dt: &chrono::DateTime<Utc>) -> Result<(), ValidationError> {
     if *dt <= Utc::now() {
         return Err(ValidationError::new("invalid_value"));
+    }
+    Ok(())
+}
+
+pub fn validate_tags(tags: &HashMap<String, String>) -> Result<(), AppError> {
+    if tags.len() > 5 {
+        return Err(AppError::BadRequest("tags: max 5 entries".into()));
+    }
+    for (k, v) in tags {
+        if k.len() > 64 {
+            return Err(AppError::BadRequest(
+                "tags: key must be 64 characters or fewer".into(),
+            ));
+        }
+        if v.len() > 255 {
+            return Err(AppError::BadRequest(
+                "tags: value must be 255 characters or fewer".into(),
+            ));
+        }
     }
     Ok(())
 }

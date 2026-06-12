@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-
 use tracing::{info, warn};
 
 use crate::common::{
     crypto::TenantCrypto,
     types::{PaginatedResponse, RequestContext},
+    validators,
 };
 use crate::error::AppError;
 use crate::features::endpoints::models::{
@@ -81,21 +80,6 @@ impl EndpointService {
         Ok(())
     }
 
-    fn validate_tags(tags: &HashMap<String, String>) -> Result<(), AppError> {
-        if tags.len() > 20 {
-            return Err(AppError::BadRequest("tags: max 20 entries".into()));
-        }
-        for (k, v) in tags {
-            if k.len() > 128 {
-                return Err(AppError::BadRequest("tags: key exceeds 128 chars".into()));
-            }
-            if v.len() > 256 {
-                return Err(AppError::BadRequest("tags: value exceeds 256 chars".into()));
-            }
-        }
-        Ok(())
-    }
-
     fn validate_rate_limit(rl: i32) -> Result<(), AppError> {
         if !(1..=100_000).contains(&rl) {
             return Err(AppError::BadRequest(
@@ -115,7 +99,7 @@ impl EndpointService {
     ) -> Result<EndpointResponse, AppError> {
         Self::validate_http_config(&req.config)?;
         Self::validate_event_types(&req.event_types)?;
-        Self::validate_tags(&req.tags)?;
+        validators::validate_tags(&req.tags)?;
         if let Some(rl) = req.rate_limit_per_minute {
             Self::validate_rate_limit(rl)?;
         }
@@ -195,7 +179,7 @@ impl EndpointService {
             Self::validate_event_types(event_types)?;
         }
         if let Some(tags) = &req.tags {
-            Self::validate_tags(tags)?;
+            validators::validate_tags(tags)?;
         }
         if let Some(Some(rl)) = req.rate_limit_per_minute {
             Self::validate_rate_limit(rl)?;

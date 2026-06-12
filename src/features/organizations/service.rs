@@ -2,7 +2,8 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::{common::types::RequestContext, error::AppError};
+use crate::common::{types::RequestContext, validators};
+use crate::error::AppError;
 
 use super::{
     models::{
@@ -28,6 +29,7 @@ impl OrganizationService {
         ctx: RequestContext,
     ) -> Result<OrganizationResponse, AppError> {
         req.validate()?;
+        if let Some(t) = &req.tags { validators::validate_tags(t)?; }
         info!(
             org_name = %req.name,
             org_slug = %req.slug,
@@ -62,6 +64,7 @@ impl OrganizationService {
         ctx: RequestContext,
     ) -> Result<OrganizationResponse, AppError> {
         req.validate()?;
+        if let Some(t) = &req.tags { validators::validate_tags(t)?; }
         info!("updating organization");
         let org = self
             .repo
