@@ -147,6 +147,24 @@ async fn fire_inner(
         let _ = endpoint_public_id; // suppress unused warning
     }
 
+    // Record schedule execution history.
+    let exec_id = Uuid::now_v7();
+    let exec_public_id = format!("sxe_{}", NanoId::new());
+    sqlx::query(
+        r#"INSERT INTO schedule_executions
+               (id, public_id, schedule_id, tenant_id, organization_id,
+                status, triggered_at, created_at)
+           VALUES ($1, $2, $3, $4, $5, 'fired', $6, NOW())"#,
+    )
+    .bind(exec_id)
+    .bind(&exec_public_id)
+    .bind(schedule_id)
+    .bind(row.tenant_id)
+    .bind(row.organization_id)
+    .bind(triggered_at)
+    .execute(&mut *tx)
+    .await?;
+
     // Update schedule timestamps and increment version.
     sqlx::query(
         r#"UPDATE schedules SET

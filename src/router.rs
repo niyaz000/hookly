@@ -13,8 +13,8 @@ use uuid::Uuid;
 use crate::common::{access_log, types::RequestContext};
 use crate::error::{AppError, REQUEST_ID};
 use crate::features::{
-    api_keys, applications, assignments, endpoints, environments, event_types, events, invites,
-    jwt_keys, organizations, permissions, platform_event_types, platform_subscriptions,
+    api_keys, applications, assignments, delivery, endpoints, environments, event_types, events,
+    invites, jwt_keys, organizations, permissions, platform_event_types, platform_subscriptions,
     platform_webhooks, roles, schedules, teams, tenants, users,
 };
 use crate::state::AppState;
@@ -52,6 +52,7 @@ fn v1_routes(state: AppState) -> Router {
         .merge(event_types::routes::routes(state.clone()))
         .merge(endpoints::routes::routes(state.clone()))
         .merge(events::routes::routes(state.clone()))
+        .merge(delivery::routes::routes(state.clone()))
         .merge(api_keys::routes::routes(state.clone()))
         .merge(environments::routes::routes(state.clone()))
         .merge(permissions::routes::routes(state.clone()))

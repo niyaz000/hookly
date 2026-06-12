@@ -165,6 +165,39 @@ impl DeliveryRepository {
         Ok(())
     }
 
+    // --- Retry ---
+
+    /// Resets a failed delivery job back to pending for re-delivery.
+    /// Returns the job row (with stream_name) if it was in 'failed' state,
+    /// or None if not found / not in a retryable state.
+    pub async fn reset_for_retry(
+        &self,
+        public_id: &str,
+    ) -> Result<Option<DeliveryJobRow>, AppError> {
+        sqlx::query_as::<_, DeliveryJobRow>(
+            r#"UPDATE delivery_jobs
+               SET status = 'pending',
+                   enqueued_at = NULL
+               WHERE public_id = $1
+                 AND status = 'failed'
+               RETURNING *"#,
+        )
+        .bind(public_id)
+        .fetch_optional(&self.db)
+        .await
+        .map_err(AppError::from)
+    }
+
+    pub async fn exists(&self, public_id: &str) -> Result<bool, AppError> {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM delivery_jobs WHERE public_id = $1)",
+        )
+        .bind(public_id)
+        .fetch_one(&self.db)
+        .await
+        .map_err(AppError::from)
+    }
+
     // --- Outbox poller ---
 
     /// Returns pending jobs that have never been XADD'd to Redis (enqueued_at IS NULL)
