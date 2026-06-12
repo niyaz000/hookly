@@ -51,8 +51,8 @@ pub struct CreateTeamRequest {
     #[validate(custom(function = "validate_not_blank", message = "name is required"))]
     #[validate(length(max = 255, message = "name must be 255 characters or fewer"))]
     pub name: String,
-    pub tenant_id: Uuid,
-    pub organization_id: Uuid,
+    pub tenant_id: String,
+    pub organization_id: String,
     pub description: Option<String>,
     pub tags: Option<HashMap<String, String>>,
     pub metadata: Option<HashMap<String, String>>,
@@ -85,7 +85,7 @@ impl UpdateTeamRequest {
 #[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct AddTeamMembersRequest {
     #[validate(length(min = 1, message = "user_ids must contain at least one entry"))]
-    pub user_ids: Vec<Uuid>,
+    pub user_ids: Vec<String>,
 }
 
 impl AddTeamMembersRequest {
@@ -166,8 +166,8 @@ impl From<TeamMember> for TeamMemberResponse {
 pub struct ListTeamsQuery {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
-    pub organization_id: Option<Uuid>,
-    pub tenant_id: Option<Uuid>,
+    pub organization_id: Option<String>,
+    pub tenant_id: Option<String>,
     pub tags: Option<HashMap<String, String>>,
 }
 

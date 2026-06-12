@@ -20,9 +20,24 @@ impl ApplicationRepository {
         Self { pool }
     }
 
+    pub async fn resolve_tenant_with_org(
+        &self,
+        public_id: &str,
+    ) -> Result<Option<(Uuid, Uuid)>, AppError> {
+        sqlx::query_as::<_, (Uuid, Uuid)>(
+            "SELECT id, organization_id FROM tenants WHERE public_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(AppError::from)
+    }
+
     pub async fn create(
         &self,
         req: CreateApplicationRequest,
+        tenant_id: Uuid,
+        organization_id: Uuid,
         ctx: RequestContext,
     ) -> Result<Application, AppError> {
         let id = Uuid::new_v4();
@@ -45,8 +60,8 @@ impl ApplicationRepository {
             "#,
         )
         .bind(id)
-        .bind(req.organization_id)
-        .bind(req.tenant_id)
+        .bind(organization_id)
+        .bind(tenant_id)
         .bind(public_id)
         .bind(req.name)
         .bind(req.description)

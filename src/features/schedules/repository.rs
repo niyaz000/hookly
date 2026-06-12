@@ -37,6 +37,26 @@ impl ScheduleRepository {
         Self { pool }
     }
 
+    pub async fn resolve_tenant(&self, public_id: &str) -> Result<Option<Uuid>, AppError> {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM tenants WHERE public_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(AppError::from)
+    }
+
+    pub async fn resolve_organization(&self, public_id: &str) -> Result<Option<Uuid>, AppError> {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM organizations WHERE public_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(AppError::from)
+    }
+
     // --- FK resolution helpers ---
 
     pub async fn resolve_event_type(

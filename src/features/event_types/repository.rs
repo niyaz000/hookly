@@ -22,9 +22,35 @@ impl EventTypeRepository {
         Self { pool }
     }
 
+    pub async fn resolve_tenant(&self, public_id: &str) -> Result<Option<Uuid>, AppError> {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM tenants WHERE public_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(AppError::from)
+    }
+
+    /// Returns (tenant_id, organization_id) in one query.
+    pub async fn resolve_tenant_with_org(
+        &self,
+        public_id: &str,
+    ) -> Result<Option<(Uuid, Uuid)>, AppError> {
+        sqlx::query_as::<_, (Uuid, Uuid)>(
+            "SELECT id, organization_id FROM tenants WHERE public_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(AppError::from)
+    }
+
     pub async fn create(
         &self,
         req: crate::features::event_types::models::CreateEventTypeRequest,
+        tenant_id: Uuid,
+        organization_id: Uuid,
         ctx: RequestContext,
     ) -> Result<EventType, AppError> {
         let id = Uuid::new_v4();
@@ -44,8 +70,8 @@ impl EventTypeRepository {
             "#
         ))
         .bind(id)
-        .bind(req.organization_id)
-        .bind(req.tenant_id)
+        .bind(organization_id)
+        .bind(tenant_id)
         .bind(public_id)
         .bind(req.name)
         .bind(schema_version)
@@ -106,8 +132,8 @@ impl EventTypeRepository {
         Ok(et)
     }
 
-    pub async fn list(&self, filter: ListQueryParams) -> Result<(Vec<EventType>, i64), AppError> {
-        debug!(tenant_id = %filter.tenant_id, "listing event_types");
+    pub async fn list(&self, tenant_id: Uuid, filter: ListQueryParams) -> Result<(Vec<EventType>, i64), AppError> {
+        debug!(tenant_id = %tenant_id, "listing event_types");
         let offset = (filter.page - 1) * filter.limit;
 
         #[derive(sqlx::FromRow)]
@@ -146,7 +172,7 @@ impl EventTypeRepository {
             LIMIT $5 OFFSET $6
             "#,
         )
-        .bind(filter.tenant_id)
+        .bind(tenant_id)
         .bind(filter.name)
         .bind(filter.schema_version)
         .bind(filter.archived)

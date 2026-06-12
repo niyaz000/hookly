@@ -62,11 +62,25 @@ impl InviteService {
         let tags = req.tags.clone().unwrap_or_else(|| serde_json::json!({}));
         let metadata = req.metadata.clone().unwrap_or_else(|| serde_json::json!({}));
 
+        let tenant_id = self
+            .repo
+            .resolve_tenant(&req.tenant_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("Tenant not found: {}", req.tenant_id)))?;
+
+        let organization_id = self
+            .repo
+            .resolve_organization(&req.organization_id)
+            .await?
+            .ok_or_else(|| {
+                AppError::NotFound(format!("Organization not found: {}", req.organization_id))
+            })?;
+
         let row = self
             .repo
             .create(
-                req.tenant_id,
-                req.organization_id,
+                tenant_id,
+                organization_id,
                 req.user_email.trim(),
                 req.role.trim(),
                 &token_hash,
@@ -119,13 +133,33 @@ impl InviteService {
         let limit = query.limit.unwrap_or(20).clamp(1, 100);
         let cursor = query.cursor.as_deref().map(Self::decode_cursor).transpose()?;
 
+        let tenant_id = match query.tenant_id {
+            Some(ref pid) => Some(
+                self.repo
+                    .resolve_tenant(pid)
+                    .await?
+                    .ok_or_else(|| AppError::NotFound(format!("Tenant not found: {pid}")))?,
+            ),
+            None => None,
+        };
+
+        let organization_id = match query.organization_id {
+            Some(ref pid) => Some(
+                self.repo
+                    .resolve_organization(pid)
+                    .await?
+                    .ok_or_else(|| AppError::NotFound(format!("Organization not found: {pid}")))?,
+            ),
+            None => None,
+        };
+
         let (rows, next_id) = self
             .repo
             .list(
                 limit,
                 cursor,
-                query.tenant_id,
-                query.organization_id,
+                tenant_id,
+                organization_id,
                 query.status.as_deref(),
                 query.user_email.as_deref(),
             )

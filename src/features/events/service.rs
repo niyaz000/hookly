@@ -163,10 +163,13 @@ impl EventService {
             info!(public_id = %row.public_id, "event created");
             self.enqueue_delivery(row.id, ep.id, row.organization_id)
                 .await;
-            events_counter().add(1, &[
-                KeyValue::new("tenant_id", row.tenant_id.to_string()),
-                KeyValue::new("application_id", req.application_id.clone()),
-            ]);
+            events_counter().add(
+                1,
+                &[
+                    KeyValue::new("tenant_id", row.tenant_id.to_string()),
+                    KeyValue::new("application_id", req.application_id.clone()),
+                ],
+            );
         } else {
             info!(public_id = %row.public_id, "idempotent replay, returning existing event");
         }

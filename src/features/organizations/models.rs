@@ -47,13 +47,19 @@ pub struct CreateOrganizationRequest {
     pub name: String,
     #[validate(custom(function = "validate_not_blank", message = "slug is required"))]
     #[validate(length(max = 64, message = "slug must be 64 characters or fewer"))]
-    #[validate(custom(function = "validate_slug", message = "slug must be lowercase alphanumeric and hyphens, not starting or ending with a hyphen"))]
+    #[validate(custom(
+        function = "validate_slug",
+        message = "slug must be lowercase alphanumeric and hyphens, not starting or ending with a hyphen"
+    ))]
     pub slug: String,
     #[validate(custom(function = "validate_not_blank", message = "billing_email is required"))]
     #[validate(email(message = "billing_email is not a valid email address"))]
     #[validate(length(max = 64, message = "billing_email must be 64 characters or fewer"))]
     pub billing_email: String,
-    #[validate(length(max = 32, message = "stripe_customer_id must be 32 characters or fewer"))]
+    #[validate(length(
+        max = 32,
+        message = "stripe_customer_id must be 32 characters or fewer"
+    ))]
     pub stripe_customer_id: Option<String>,
     #[validate(length(max = 64, message = "external_id must be 64 characters or fewer"))]
     pub external_id: Option<String>,
@@ -75,12 +81,18 @@ pub struct UpdateOrganizationRequest {
     pub name: Option<String>,
     #[validate(custom(function = "validate_not_blank", message = "slug cannot be empty"))]
     #[validate(length(max = 64, message = "slug must be 64 characters or fewer"))]
-    #[validate(custom(function = "validate_slug", message = "slug must be lowercase alphanumeric and hyphens, not starting or ending with a hyphen"))]
+    #[validate(custom(
+        function = "validate_slug",
+        message = "slug must be lowercase alphanumeric and hyphens, not starting or ending with a hyphen"
+    ))]
     pub slug: Option<String>,
     #[validate(email(message = "billing_email is not a valid email address"))]
     #[validate(length(max = 64, message = "billing_email must be 64 characters or fewer"))]
     pub billing_email: Option<String>,
-    #[validate(length(max = 32, message = "stripe_customer_id must be 32 characters or fewer"))]
+    #[validate(length(
+        max = 32,
+        message = "stripe_customer_id must be 32 characters or fewer"
+    ))]
     pub stripe_customer_id: Option<String>,
     #[validate(length(max = 64, message = "external_id must be 64 characters or fewer"))]
     pub external_id: Option<String>,

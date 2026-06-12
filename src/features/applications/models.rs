@@ -31,8 +31,7 @@ pub struct Application {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateApplicationRequest {
-    pub tenant_id: Uuid,
-    pub organization_id: Uuid,
+    pub tenant_id: String,
     pub name: String,
     pub description: String,
     pub tags: HashMap<String, String>,

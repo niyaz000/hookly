@@ -36,7 +36,17 @@ impl EventTypeService {
     ) -> Result<EventTypeResponse, AppError> {
         Self::validate_schema(&req.event_schema)?;
         info!("creating event_type");
-        let et = self.repo.create(req, ctx).await?;
+
+        let (tenant_id, organization_id) = self
+            .repo
+            .resolve_tenant_with_org(&req.tenant_id)
+            .await?
+            .ok_or_else(|| {
+                warn!(tenant_id = %req.tenant_id, "tenant not found");
+                AppError::NotFound(format!("Tenant not found: {}", req.tenant_id))
+            })?;
+
+        let et = self.repo.create(req, tenant_id, organization_id, ctx).await?;
         info!(public_id = %et.public_id, "event_type created");
         Ok(EventTypeResponse::from(et))
     }
@@ -67,7 +77,17 @@ impl EventTypeService {
     ) -> Result<PaginatedResponse<EventTypeResponse>, AppError> {
         let page = filter.page;
         let limit = filter.limit;
-        let (items, total) = self.repo.list(filter).await?;
+
+        let tenant_id = self
+            .repo
+            .resolve_tenant(&filter.tenant_id)
+            .await?
+            .ok_or_else(|| {
+                warn!(tenant_id = %filter.tenant_id, "tenant not found");
+                AppError::NotFound(format!("Tenant not found: {}", filter.tenant_id))
+            })?;
+
+        let (items, total) = self.repo.list(tenant_id, filter).await?;
         Ok(PaginatedResponse {
             items: items.into_iter().map(EventTypeResponse::from).collect(),
             total,

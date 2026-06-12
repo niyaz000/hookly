@@ -23,7 +23,17 @@ impl ApplicationService {
         ctx: RequestContext,
     ) -> Result<Application, AppError> {
         info!("creating application");
-        let application = self.repo.create(req, ctx).await?;
+
+        let (tenant_id, organization_id) = self
+            .repo
+            .resolve_tenant_with_org(&req.tenant_id)
+            .await?
+            .ok_or_else(|| {
+                warn!(tenant_id = %req.tenant_id, "tenant not found");
+                AppError::NotFound(format!("Tenant not found: {}", req.tenant_id))
+            })?;
+
+        let application = self.repo.create(req, tenant_id, organization_id, ctx).await?;
         info!(public_id = %application.public_id, "application created");
         Ok(application)
     }

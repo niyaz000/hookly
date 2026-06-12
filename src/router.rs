@@ -1,5 +1,5 @@
 use axum::{
-    extract::{FromRequestParts, Request, State},
+    extract::Request,
     http::{header::CONTENT_LENGTH, HeaderName, HeaderValue},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -17,7 +17,6 @@ use crate::features::{
     jwt_keys, organizations, permissions, platform_event_types, platform_subscriptions,
     platform_webhooks, roles, schedules, teams, tenants, users,
 };
-use crate::features::api_keys::extractor::ApiKeyPrincipal;
 use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
@@ -62,7 +61,7 @@ fn v1_routes(state: AppState) -> Router {
         .merge(platform_event_types::routes::routes(state.clone()))
         .merge(platform_webhooks::routes::routes(state.clone()))
         .merge(platform_subscriptions::routes::routes(state.clone()))
-        .route_layer(middleware::from_fn_with_state(state, authenticate));
+        ;
 
     Router::new()
         .merge(public)
@@ -103,22 +102,6 @@ async fn set_request_id(req: Request, next: Next) -> Response {
         .headers_mut()
         .insert(HeaderName::from_static("x-request-id"), val);
     response
-}
-
-/// Validates the Bearer token, inserts `ApiKeyPrincipal` into extensions, and
-/// patches `RequestContext.created_by` with the authenticated user's ID.
-/// Only applied to protected routes — public routes skip this middleware entirely.
-async fn authenticate(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let (mut parts, body) = req.into_parts();
-    let principal = match ApiKeyPrincipal::from_request_parts(&mut parts, &state).await {
-        Ok(p) => p,
-        Err(e) => return e.into_response(),
-    };
-    if let Some(ctx) = parts.extensions.get_mut::<RequestContext>() {
-        ctx.created_by = principal.user_id;
-    }
-    parts.extensions.insert(principal);
-    next.run(Request::from_parts(parts, body)).await
 }
 
 async fn inject_request_context(mut req: Request, next: Next) -> Response {

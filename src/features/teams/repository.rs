@@ -18,9 +18,59 @@ impl TeamRepository {
         Self { pool }
     }
 
+    pub async fn resolve_tenant(&self, public_id: &str) -> Result<Option<Uuid>, AppError> {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM tenants WHERE public_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(AppError::from)
+    }
+
+    pub async fn resolve_organization(&self, public_id: &str) -> Result<Option<Uuid>, AppError> {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM organizations WHERE public_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(AppError::from)
+    }
+
+    pub async fn resolve_users(&self, public_ids: &[String]) -> Result<Vec<Uuid>, AppError> {
+        if public_ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let rows: Vec<(Uuid, String)> = sqlx::query_as(
+            "SELECT id, public_id FROM identity.users \
+             WHERE public_id = ANY($1) AND deleted_at IS NULL",
+        )
+        .bind(public_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let missing: Vec<&str> = public_ids
+            .iter()
+            .filter(|pid| !rows.iter().any(|(_, found)| found == *pid))
+            .map(|s| s.as_str())
+            .collect();
+
+        if !missing.is_empty() {
+            return Err(AppError::NotFound(format!(
+                "Users not found: {}",
+                missing.join(", ")
+            )));
+        }
+
+        Ok(rows.into_iter().map(|(id, _)| id).collect())
+    }
+
     pub async fn create(
         &self,
         req: CreateTeamRequest,
+        tenant_id: Uuid,
+        organization_id: Uuid,
         ctx: RequestContext,
     ) -> Result<Team, AppError> {
         let id = Uuid::now_v7();
@@ -47,8 +97,8 @@ impl TeamRepository {
         .bind(id)
         .bind(&public_id)
         .bind(&req.name)
-        .bind(req.tenant_id)
-        .bind(req.organization_id)
+        .bind(tenant_id)
+        .bind(organization_id)
         .bind(req.description.as_deref())
         .bind(Json(req.tags.unwrap_or_default()))
         .bind(Json(req.metadata.unwrap_or_default()))

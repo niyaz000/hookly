@@ -29,7 +29,26 @@ impl UserService {
     ) -> Result<UserResponse, AppError> {
         req.validate()?;
         info!("creating user");
-        let user = self.repo.create(req, ctx).await?;
+
+        let tenant_id = self
+            .repo
+            .resolve_tenant(&req.tenant_id)
+            .await?
+            .ok_or_else(|| {
+                warn!(tenant_id = %req.tenant_id, "tenant not found");
+                AppError::NotFound(format!("Tenant not found: {}", req.tenant_id))
+            })?;
+
+        let organization_id = self
+            .repo
+            .resolve_organization(&req.organization_id)
+            .await?
+            .ok_or_else(|| {
+                warn!(organization_id = %req.organization_id, "organization not found");
+                AppError::NotFound(format!("Organization not found: {}", req.organization_id))
+            })?;
+
+        let user = self.repo.create(req, tenant_id, organization_id, ctx).await?;
         info!(public_id = %user.public_id, "user created");
         Ok(UserResponse::from(user))
     }
@@ -162,14 +181,34 @@ impl UserService {
         let limit = query.limit.unwrap_or(20).clamp(1, 100);
         let cursor = query.cursor.as_deref().map(decode_cursor).transpose()?;
 
+        let organization_id = match query.organization_id {
+            Some(ref pid) => Some(
+                self.repo
+                    .resolve_organization(pid)
+                    .await?
+                    .ok_or_else(|| AppError::NotFound(format!("Organization not found: {pid}")))?,
+            ),
+            None => None,
+        };
+
+        let tenant_id = match query.tenant_id {
+            Some(ref pid) => Some(
+                self.repo
+                    .resolve_tenant(pid)
+                    .await?
+                    .ok_or_else(|| AppError::NotFound(format!("Tenant not found: {pid}")))?,
+            ),
+            None => None,
+        };
+
         let (users, next_cursor_id) = self
             .repo
             .list(
                 limit,
                 cursor,
                 query.status,
-                query.organization_id,
-                query.tenant_id,
+                organization_id,
+                tenant_id,
             )
             .await?;
 

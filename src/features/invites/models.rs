@@ -62,8 +62,8 @@ pub struct CreateInviteRequest {
     #[validate(custom(function = "validate_not_blank", message = "role is required"))]
     #[validate(length(max = 50, message = "role must be 50 characters or fewer"))]
     pub role: String,
-    pub tenant_id: Uuid,
-    pub organization_id: Uuid,
+    pub tenant_id: String,
+    pub organization_id: String,
     #[validate(custom(function = "validate_future_date", message = "expires_at must be a future date"))]
     pub expires_at: Option<DateTime<Utc>>,
     pub tags: Option<serde_json::Value>,
@@ -91,8 +91,8 @@ pub struct AcceptInviteRequest {
 pub struct ListInvitesQuery {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
-    pub tenant_id: Option<Uuid>,
-    pub organization_id: Option<Uuid>,
+    pub tenant_id: Option<String>,
+    pub organization_id: Option<String>,
     pub status: Option<String>,
     pub user_email: Option<String>,
     pub tags: Option<serde_json::Value>,

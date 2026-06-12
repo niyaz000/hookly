@@ -49,8 +49,8 @@ pub struct User {
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct CreateUserRequest {
-    pub organization_id: Uuid,
-    pub tenant_id: Uuid,
+    pub organization_id: String,
+    pub tenant_id: String,
     #[validate(custom(function = "validate_not_blank", message = "email is required"))]
     #[validate(email(message = "email is not a valid email address"))]
     #[validate(length(max = 64, message = "email must be 64 characters or fewer"))]
@@ -143,8 +143,8 @@ pub struct ListUsersQuery {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
     pub status: Option<UserStatus>,
-    pub organization_id: Option<Uuid>,
-    pub tenant_id: Option<Uuid>,
+    pub organization_id: Option<String>,
+    pub tenant_id: Option<String>,
     pub tags: Option<HashMap<String, String>>,
 }
 
