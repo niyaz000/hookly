@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::{
-    common::{idempotency, qs_query::QsQuery, types::RequestContext, ValidatedJson},
+    common::{idempotency, qs_query::QsQuery, types::RequestContext, validators, ValidatedJson},
     error::AppError,
     features::organizations::{
         models::{
@@ -46,6 +46,7 @@ pub async fn get_organization(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<Json<OrganizationResponse>, AppError> {
+    validators::validate_id_prefix(&public_id, "org_", "organization")?;
     let org = service(state).get_by_public_id(public_id).await?;
     Ok(Json(org))
 }

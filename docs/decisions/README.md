@@ -19,6 +19,7 @@ Decisions about the shape of the HTTP API: response envelopes, error formats, id
 | [007](api-design/007-idempotency-key.md) | Idempotency key design and replay semantics | Accepted |
 | [008](api-design/008-filtering-and-sorting.md) | Filtering and sorting query parameters | Accepted |
 | [009](api-design/009-public-id-length.md) | Public ID length — 16-character NanoId on a 62-symbol alphabet | Accepted |
+| [010](api-design/010-entity-tags.md) | Entity tags — structured key-value metadata on all resources | Accepted |
 
 ---
 

@@ -9,6 +9,7 @@ use crate::{
         idempotency,
         qs_query::QsQuery,
         types::RequestContext,
+        validators,
         ValidatedJson,
     },
     error::AppError,
@@ -56,6 +57,7 @@ pub async fn get_schedule(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<Json<ScheduleResponse>, AppError> {
+    validators::validate_id_prefix(&public_id, "sch_", "schedule")?;
     let schedule = service(state).get_by_public_id(public_id).await?;
     Ok(Json(schedule))
 }
@@ -136,6 +138,8 @@ pub async fn get_execution(
     State(state): State<AppState>,
     Path((public_id, exec_public_id)): Path<(String, String)>,
 ) -> Result<Json<ScheduleExecutionResponse>, AppError> {
+    validators::validate_id_prefix(&public_id, "sch_", "schedule")?;
+    validators::validate_id_prefix(&exec_public_id, "sxe_", "schedule execution")?;
     let execution = service(state).get_execution(public_id, exec_public_id).await?;
     Ok(Json(execution))
 }

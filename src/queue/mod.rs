@@ -10,6 +10,10 @@ pub const STREAM_PLATINUM: &str = "hookly:q:tier:platinum";
 /// All shared tier streams. Ensure these groups exist at API + worker startup.
 pub const TIER_STREAMS: &[&str] = &[STREAM_DEFAULT, STREAM_SILVER, STREAM_GOLD, STREAM_PLATINUM];
 
+/// Redis sorted set that drives worker scheduling. Score = last-claimed-at (ms).
+/// Workers claim the lowest-score stream; publishers register streams on enqueue.
+pub const STREAM_SET_KEY: &str = "hookly:q:streams";
+
 /// Resolves the stream name for an org based on its tier.
 ///
 /// Enterprise orgs get a dedicated stream scoped to their org UUID so they
@@ -120,6 +124,122 @@ pub async fn xautoclaim(
             vec![]
         }
     }
+}
+
+/// Atomically claims the stream with the lowest score (least recently consumed)
+/// by updating its score to `now_ms`. Returns the stream name, or None if the
+/// set is empty. Redis single-threaded Lua execution ensures no two workers
+/// ever claim the same stream in the same instant.
+pub async fn claim_next_stream(client: &redis::Client, now_ms: u64) -> Option<String> {
+    let mut conn = match client.get_multiplexed_async_connection().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("claim_next_stream: connect failed: {e}");
+            return None;
+        }
+    };
+
+    let script = redis::Script::new(
+        r#"
+        local members = redis.call('ZRANGE', KEYS[1], 0, 0)
+        if #members == 0 then return nil end
+        local stream = members[1]
+        redis.call('ZADD', KEYS[1], tonumber(ARGV[1]), stream)
+        return stream
+        "#,
+    );
+
+    match script
+        .key(STREAM_SET_KEY)
+        .arg(now_ms)
+        .invoke_async::<Option<String>>(&mut conn)
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("claim_next_stream: script failed: {e}");
+            None
+        }
+    }
+}
+
+/// Adds `stream` to the scheduling sorted set with score 0 (highest priority)
+/// using NX — no-op if the stream is already present so an active stream's
+/// score is never reset mid-rotation.
+pub async fn register_stream(
+    client: &redis::Client,
+    stream: &str,
+) -> Result<(), redis::RedisError> {
+    let mut conn = client.get_multiplexed_async_connection().await?;
+    redis::cmd("ZADD")
+        .arg(STREAM_SET_KEY)
+        .arg("NX")
+        .arg(0i64)
+        .arg(stream)
+        .query_async::<()>(&mut conn)
+        .await
+}
+
+/// Atomically removes `stream` from the scheduling set only when the stream
+/// has no messages. Returns true if removed. The atomic XLEN check closes the
+/// race where a publisher XADDs a message and calls register_stream (NX no-op,
+/// stream still in set) just before we would ZREM it.
+pub async fn remove_stream_if_empty(client: &redis::Client, stream: &str) -> bool {
+    let mut conn = match client.get_multiplexed_async_connection().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("remove_stream_if_empty: connect failed: {e}");
+            return false;
+        }
+    };
+
+    let script = redis::Script::new(
+        r#"
+        local len = redis.call('XLEN', KEYS[1])
+        if len == 0 then
+            redis.call('ZREM', KEYS[2], KEYS[1])
+            return 1
+        end
+        return 0
+        "#,
+    );
+
+    match script
+        .key(stream)
+        .key(STREAM_SET_KEY)
+        .invoke_async::<i64>(&mut conn)
+        .await
+    {
+        Ok(1) => true,
+        Ok(_) => false,
+        Err(e) => {
+            tracing::warn!("remove_stream_if_empty: script failed for {stream}: {e}");
+            false
+        }
+    }
+}
+
+/// Returns all stream names currently in the scheduling sorted set, ordered
+/// by score ascending. Used by reclaim and trim tasks.
+pub async fn list_scheduled_streams(client: &redis::Client) -> Vec<String> {
+    let mut conn = match client.get_multiplexed_async_connection().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("list_scheduled_streams: connect failed: {e}");
+            return vec![];
+        }
+    };
+
+    redis::cmd("ZRANGE")
+        .arg(STREAM_SET_KEY)
+        .arg(0i64)
+        .arg(-1i64)
+        .query_async::<Vec<String>>(&mut conn)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("list_scheduled_streams failed: {e}");
+            vec![]
+        })
 }
 
 // --- Internal parsing helpers ---

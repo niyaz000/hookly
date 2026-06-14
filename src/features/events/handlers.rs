@@ -9,6 +9,7 @@ use crate::{
         idempotency,
         qs_query::QsQuery,
         types::{PaginatedResponse, RequestContext},
+        validators,
         ValidatedJson,
     },
     error::AppError,
@@ -71,6 +72,7 @@ pub async fn get_event(
     State(state): State<AppState>,
     Path(evt_id): Path<String>,
 ) -> Result<(StatusCode, Json<EventResponse>), AppError> {
+    validators::validate_id_prefix(&evt_id, "evn_", "event")?;
     let ev = svc(state).get_by_id(evt_id).await?;
     Ok((StatusCode::OK, Json(ev)))
 }

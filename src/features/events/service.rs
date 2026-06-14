@@ -66,6 +66,9 @@ impl EventService {
                     if let Err(e) = self.delivery.mark_enqueued(job.id).await {
                         warn!(job_public_id = %job.public_id, "mark_enqueued failed: {e:?}");
                     }
+                    if let Err(e) = queue::register_stream(&self.redis, &stream).await {
+                        warn!(stream = %stream, "register_stream failed: {e}");
+                    }
                     info!(job_public_id = %job.public_id, "delivery job enqueued");
                 }
                 Err(e) => {

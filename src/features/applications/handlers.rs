@@ -8,6 +8,7 @@ use crate::{
     common::{
         idempotency,
         types::RequestContext,
+        validators,
         ValidatedJson,
     },
     error::AppError,
@@ -52,6 +53,7 @@ pub async fn get_by_id(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<(StatusCode, Json<GetApplicationResponse>), AppError> {
+    validators::validate_id_prefix(&public_id, "app_", "application")?;
     let service = ApplicationService::new(ApplicationRepository::new(state.db));
     let application = service.get_by_id(public_id).await?;
     Ok((StatusCode::OK, Json(application)))

@@ -1,9 +1,8 @@
-use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::Utc;
 use sqlx::PgPool;
-use tokio::sync::{RwLock, watch};
+use tokio::sync::watch;
 use tracing::{error, info, warn};
 
 use hookly::common::TenantCrypto;
@@ -12,21 +11,22 @@ use hookly::queue;
 
 use crate::deliver;
 
-/// Runs a single worker task with fair round-robin scheduling across streams.
+/// Runs a single worker task using sorted-set-based stream scheduling.
 ///
-/// Each iteration reads one stream non-blocking and then advances to the next.
-/// A stream with a large backlog never starves other streams: every stream gets
-/// one turn per rotation regardless of how many messages it holds.
+/// Each iteration atomically claims the stream with the lowest score (least
+/// recently consumed) by updating its score to now_ms. This is the only
+/// coordination needed: Redis single-threaded Lua execution guarantees no two
+/// workers claim the same stream simultaneously.
 ///
-/// Sleep behaviour: workers only pause when a full rotation (all streams)
-/// returns empty, keeping latency low under load while avoiding a busy-loop at
-/// idle. `WORKER_POLL_INTERVAL_MS` (default 250 ms) controls the idle sleep.
+/// When a stream is empty it is removed from the set (atomically, to avoid a
+/// race with concurrent publishers). Publishers re-register a stream via
+/// register_stream(NX) on every enqueue, so empty removal is safe.
 ///
-/// Staggered start: `worker_id` sets the initial stream index so N workers
-/// spread their first reads across N different streams.
+/// Workers sleep only when the sorted set is empty (all streams drained).
+/// Once any new event arrives the publisher re-adds the stream and workers
+/// pick it up within poll_interval_ms.
 pub async fn run(
     worker_id: usize,
-    streams: Arc<RwLock<Vec<String>>>,
     config: crate::config::WorkerConfig,
     db: PgPool,
     redis: redis::Client,
@@ -38,57 +38,32 @@ pub async fn run(
     let delivery_repo = DeliveryRepository::new(db);
     info!(worker_id, consumer = %consumer_name, "consumer started");
 
-    // Each worker starts at a different stream to spread the first-read load.
-    let mut stream_idx = worker_id;
-    // Counts consecutive empty reads. Once it reaches the number of streams in
-    // a rotation, we know the whole list was empty and sleep before retrying.
-    let mut empty_streak: usize = 0;
-
     loop {
         if *shutdown_rx.borrow() {
             break;
         }
 
-        let current = streams.read().await.clone();
-        let n = current.len();
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
 
-        if n == 0 {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            continue;
-        }
+        let stream = match queue::claim_next_stream(&redis, now_ms).await {
+            Some(s) => s,
+            None => {
+                // No streams registered — all are drained or none yet exist.
+                tokio::time::sleep(Duration::from_millis(config.poll_interval_ms)).await;
+                continue;
+            }
+        };
 
-        // Wrap index safely when the streams list grows or shrinks.
-        stream_idx %= n;
-        let stream = current[stream_idx].clone();
-
-        // Always advance before processing so a panic in process_one doesn't
-        // pin the worker on the same stream indefinitely.
-        stream_idx = (stream_idx + 1) % n;
-
-        let messages = queue::xreadgroup_single(
-            &redis,
-            &stream,
-            &consumer_name,
-            config.batch_size,
-        )
-        .await;
+        let messages =
+            queue::xreadgroup_single(&redis, &stream, &consumer_name, config.batch_size).await;
 
         if messages.is_empty() {
-            empty_streak += 1;
-            // After one full rotation with no messages, sleep to avoid hammering
-            // Redis and wasting CPU. Reset the streak after sleeping.
-            if empty_streak >= n {
-                tokio::time::sleep(Duration::from_millis(config.poll_interval_ms)).await;
-                empty_streak = 0;
-                if *shutdown_rx.borrow() {
-                    break;
-                }
-            }
+            queue::remove_stream_if_empty(&redis, &stream).await;
             continue;
         }
-
-        // Got messages from this stream — reset the idle counter and process.
-        empty_streak = 0;
 
         for (msg_id, job_pub_id) in messages {
             if *shutdown_rx.borrow() {
@@ -173,7 +148,6 @@ pub async fn process_one(
     } else {
         let next_attempt = job.attempt + 1;
         if next_attempt < job.max_attempts {
-            // Exponential backoff: 30s, 60s, 120s, 240s, … capped at 1 hour.
             let backoff_secs = (30u64 * 2u64.pow(job.attempt as u32)).min(3600);
             let retry_after = Utc::now() + chrono::Duration::seconds(backoff_secs as i64);
             warn!(

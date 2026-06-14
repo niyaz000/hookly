@@ -1,21 +1,10 @@
-use std::sync::Arc;
-
-use tokio::sync::{RwLock, watch};
+use tokio::sync::watch;
 use tracing::info;
 
-/// Periodically trims each stream using a data-safe MINID strategy:
-///
-/// - PEL non-empty → XTRIM MINID = oldest pending entry.
-///   Everything before it is guaranteed ACK'd (Redis delivers in monotonic order).
-/// - PEL empty → XTRIM MINID = last-delivered-id from XINFO GROUPS.
-///   All entries were consumed and ACK'd; stream is safe to compact.
-///
-/// This prevents memory growth without risking loss of undelivered messages.
-/// Contrast with MAXLEN, which can trim entries that are in the stream but not
-/// yet consumed — those have `enqueued_at IS NOT NULL` so the outbox poller
-/// would never recover them.
+/// Periodically trims each active stream using a data-safe MINID strategy.
+/// Reads the current stream list from the scheduling sorted set so it stays
+/// in sync with the worker's view of active streams without a separate shared Vec.
 pub async fn run(
-    streams: Arc<RwLock<Vec<String>>>,
     redis: redis::Client,
     interval_secs: u64,
     mut shutdown_rx: watch::Receiver<bool>,
@@ -35,7 +24,7 @@ pub async fn run(
             break;
         }
 
-        let current = streams.read().await.clone();
+        let current = hookly::queue::list_scheduled_streams(&redis).await;
         for stream in &current {
             hookly::queue::xtrim_safe(&redis, stream).await;
         }

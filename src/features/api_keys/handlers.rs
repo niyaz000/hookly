@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::{
-    common::{types::RequestContext, qs_query::QsQuery, ValidatedJson},
+    common::{types::RequestContext, qs_query::QsQuery, validators, ValidatedJson},
     error::AppError,
     features::environments::repository::EnvironmentRepository,
     state::AppState,
@@ -64,6 +64,7 @@ pub async fn get_api_key(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<(StatusCode, Json<ApiKeyResponse>), AppError> {
+    validators::validate_id_prefix(&public_id, "key_", "api key")?;
     let svc = make_svc(state);
     let key = svc.get_by_id(&public_id).await?;
 

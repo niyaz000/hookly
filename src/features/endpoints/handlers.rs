@@ -9,6 +9,7 @@ use crate::{
         idempotency,
         qs_query::QsQuery,
         types::{PaginatedResponse, RequestContext},
+        validators,
         ValidatedJson,
     },
     error::AppError,
@@ -63,6 +64,7 @@ pub async fn get_endpoint(
     State(state): State<AppState>,
     Path(ep_id): Path<String>,
 ) -> Result<(StatusCode, Json<EndpointResponse>), AppError> {
+    validators::validate_id_prefix(&ep_id, "ep_", "endpoint")?;
     let ep = svc(state).get_by_id(ep_id).await?;
     Ok((StatusCode::OK, Json(ep)))
 }

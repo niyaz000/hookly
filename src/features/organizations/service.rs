@@ -29,7 +29,9 @@ impl OrganizationService {
         ctx: RequestContext,
     ) -> Result<OrganizationResponse, AppError> {
         req.validate()?;
-        if let Some(t) = &req.tags { validators::validate_tags(t)?; }
+        if let Some(t) = &req.tags {
+            validators::validate_tags(t)?;
+        }
         info!(
             org_name = %req.name,
             org_slug = %req.slug,
@@ -64,7 +66,9 @@ impl OrganizationService {
         ctx: RequestContext,
     ) -> Result<OrganizationResponse, AppError> {
         req.validate()?;
-        if let Some(t) = &req.tags { validators::validate_tags(t)?; }
+        if let Some(t) = &req.tags {
+            validators::validate_tags(t)?;
+        }
         info!("updating organization");
         let org = self
             .repo

@@ -65,12 +65,13 @@ Style: horizontal flow left-to-right, API server in the center
 
 Hookly runs as two independent processes:
 
-| Process | Binary | Role |
-|---|---|---|
-| API server | `hookly` | Handles all REST API traffic; emits events to the delivery queue |
-| Delivery worker | `worker` | Reads from Redis Streams; dispatches HTTP payloads to tenant endpoints |
+| Process | Binary | Role | Detail |
+|---|---|---|---|
+| API server | `hookly` | Handles all REST API traffic; emits events to the delivery queue | — |
+| Delivery worker | `worker` | Reads from Redis Streams; dispatches HTTP payloads to tenant endpoints | [worker-lld.md](worker-lld.md) |
+| Scheduler | `hookly-scheduler` | Evaluates cron schedules; fires events into the delivery pipeline | [scheduler-lld.md](scheduler-lld.md) |
 
-They share a PostgreSQL database and a Redis instance. The two processes have no direct network connection to each other — Redis is the coupling point.
+They share a PostgreSQL database and a Redis instance. The processes have no direct network connection to each other — Redis is the coupling point.
 
 ## Request lifecycle
 

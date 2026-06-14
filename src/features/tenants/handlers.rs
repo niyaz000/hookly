@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::{
-    common::{idempotency, qs_query::QsQuery, types::RequestContext, ValidatedJson},
+    common::{idempotency, qs_query::QsQuery, types::RequestContext, validators, ValidatedJson},
     error::AppError,
     features::{
         permissions::repository::PermissionRepository,
@@ -54,6 +54,7 @@ pub async fn get_tenant(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<Json<TenantResponse>, AppError> {
+    validators::validate_id_prefix(&public_id, "ten_", "tenant")?;
     let tenant = service(state).get_by_public_id(public_id).await?;
     Ok(Json(tenant))
 }

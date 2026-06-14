@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::{
-    common::{qs_query::QsQuery, types::RequestContext, ValidatedJson},
+    common::{qs_query::QsQuery, types::RequestContext, validators, ValidatedJson},
     error::AppError,
     features::permissions::repository::PermissionRepository,
     state::AppState,
@@ -44,6 +44,7 @@ pub async fn get_role(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<Json<RoleResponse>, AppError> {
+    validators::validate_id_prefix(&public_id, "rol_", "role")?;
     let role = make_svc(state).get_by_id(&public_id).await?;
     Ok(Json(RoleResponse::from(role)))
 }

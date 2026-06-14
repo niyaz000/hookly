@@ -30,6 +30,15 @@ pub fn validate_future_date(dt: &chrono::DateTime<Utc>) -> Result<(), Validation
     Ok(())
 }
 
+pub fn validate_id_prefix(id: &str, expected: &str, entity: &str) -> Result<(), AppError> {
+    if !id.starts_with(expected) {
+        return Err(AppError::BadRequest(format!(
+            "Invalid {entity} ID '{id}': expected a '{expected}' prefix"
+        )));
+    }
+    Ok(())
+}
+
 pub fn validate_tags(tags: &HashMap<String, String>) -> Result<(), AppError> {
     if tags.len() > 5 {
         return Err(AppError::BadRequest("tags: max 5 entries".into()));

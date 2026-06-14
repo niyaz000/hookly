@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::{
-    common::{qs_query::QsQuery, types::RequestContext, ValidatedJson},
+    common::{qs_query::QsQuery, types::RequestContext, validators, ValidatedJson},
     error::AppError,
     state::AppState,
 };
@@ -46,6 +46,7 @@ pub async fn get_platform_webhook(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<(StatusCode, Json<PlatformWebhookResponse>), AppError> {
+    validators::validate_id_prefix(&public_id, "pwh_", "platform webhook")?;
     let webhook = svc(state).get_by_id(&public_id).await?;
     Ok((StatusCode::OK, Json(webhook)))
 }

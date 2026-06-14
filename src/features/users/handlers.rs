@@ -9,6 +9,7 @@ use crate::{
         idempotency,
         qs_query::QsQuery,
         types::RequestContext,
+        validators,
         ValidatedJson,
     },
     error::AppError,
@@ -55,6 +56,7 @@ pub async fn get_user(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<Json<UserResponse>, AppError> {
+    validators::validate_id_prefix(&public_id, "usr_", "user")?;
     let user = service(state).get_by_public_id(public_id).await?;
     Ok(Json(user))
 }

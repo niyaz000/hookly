@@ -9,6 +9,7 @@ use crate::{
         idempotency,
         qs_query::QsQuery,
         types::RequestContext,
+        validators,
         ValidatedJson,
     },
     error::AppError,
@@ -57,6 +58,7 @@ pub async fn get_invite(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<Json<InviteResponse>, AppError> {
+    validators::validate_id_prefix(&public_id, "inv_", "invite")?;
     let invite = service(&state).get(public_id).await?;
     Ok(Json(invite))
 }

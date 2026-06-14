@@ -53,6 +53,9 @@ pub async fn run(
         for job in jobs {
             match queue::enqueue(&redis, &job.stream_name, &job.public_id).await {
                 Ok(_) => {
+                    if let Err(e) = queue::register_stream(&redis, &job.stream_name).await {
+                        warn!(stream = %job.stream_name, "outbox: register_stream failed: {e}");
+                    }
                     if let Err(e) = delivery_repo.mark_enqueued(job.id).await {
                         warn!(job_public_id = %job.public_id, "outbox: mark_enqueued failed: {e:?}");
                     }

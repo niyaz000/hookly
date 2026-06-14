@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 
-use crate::{error::AppError, state::AppState};
+use crate::{common::validators, error::AppError, state::AppState};
 
 use super::{
     models::{ListPlatformEventTypesQuery, ListPlatformEventTypesResponse, PlatformEventTypeResponse},
@@ -35,6 +35,7 @@ pub async fn get_platform_event_type(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<(StatusCode, Json<PlatformEventTypeResponse>), AppError> {
+    validators::validate_id_prefix(&public_id, "pet_", "platform event type")?;
     let et = repo(state)
         .get_by_public_id(&public_id)
         .await?

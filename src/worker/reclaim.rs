@@ -1,7 +1,5 @@
-use std::sync::Arc;
-
 use sqlx::PgPool;
-use tokio::sync::{RwLock, watch};
+use tokio::sync::watch;
 use tracing::info;
 
 use hookly::common::TenantCrypto;
@@ -10,11 +8,10 @@ use hookly::queue;
 
 use crate::consumer;
 
-/// Periodically runs XAUTOCLAIM across all streams to recover messages that
-/// were assigned to a crashed or slow consumer and have been idle beyond
+/// Periodically runs XAUTOCLAIM across all active streams to recover messages
+/// that were assigned to a crashed or slow consumer and have been idle beyond
 /// `reclaim_idle_ms`. Reclaimed messages are processed immediately.
 pub async fn run(
-    streams: Arc<RwLock<Vec<String>>>,
     config: crate::config::WorkerConfig,
     db: PgPool,
     redis: redis::Client,
@@ -38,7 +35,7 @@ pub async fn run(
             break;
         }
 
-        let current_streams = streams.read().await.clone();
+        let current_streams = queue::list_scheduled_streams(&redis).await;
         for stream in &current_streams {
             let claimed = queue::xautoclaim(
                 &redis,

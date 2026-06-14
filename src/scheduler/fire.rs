@@ -202,6 +202,11 @@ async fn fire_inner(
             warn!(job_public_id = %job_public_id, error = %e, "XADD failed; outbox poller will retry");
         }
     }
+    if !job_ids.is_empty() {
+        if let Err(e) = queue::register_stream(redis, &stream).await {
+            warn!(stream = %stream, error = %e, "register_stream failed");
+        }
+    }
 
     let result = FireResult {
         schedule_public_id: row.public_id,

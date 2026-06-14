@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::{
-    common::{qs_query::QsQuery, types::RequestContext, ValidatedJson},
+    common::{qs_query::QsQuery, types::RequestContext, validators, ValidatedJson},
     error::AppError,
     state::AppState,
 };
@@ -41,6 +41,7 @@ pub async fn get_environment(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<(StatusCode, Json<EnvironmentResponse>), AppError> {
+    validators::validate_id_prefix(&public_id, "env_", "environment")?;
     let svc = make_svc(state);
     let env = svc.get_by_id(&public_id).await?;
 

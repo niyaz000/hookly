@@ -7,7 +7,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::{
-    common::{qs_query::QsQuery, types::RequestContext, ValidatedJson},
+    common::{qs_query::QsQuery, types::RequestContext, validators, ValidatedJson},
     error::AppError,
     state::AppState,
 };
@@ -42,6 +42,7 @@ pub async fn get_jwt_key(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<Json<JwtKeyResponse>, AppError> {
+    validators::validate_id_prefix(&public_id, "jwk_", "jwt key")?;
     let key = make_svc(state).get_by_id(&public_id).await?;
     Ok(Json(JwtKeyResponse::from_key(key)))
 }

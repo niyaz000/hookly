@@ -5,7 +5,7 @@ use axum::{
 };
 
 use crate::{
-    common::{qs_query::QsQuery, ValidatedJson},
+    common::{qs_query::QsQuery, validators, ValidatedJson},
     error::AppError,
     state::AppState,
 };
@@ -38,6 +38,7 @@ pub async fn get_permission(
     State(state): State<AppState>,
     Path(public_id): Path<String>,
 ) -> Result<Json<PermissionResponse>, AppError> {
+    validators::validate_id_prefix(&public_id, "per_", "permission")?;
     let perm = make_svc(state).get_by_id(&public_id).await?;
     Ok(Json(PermissionResponse::from(perm)))
 }

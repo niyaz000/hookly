@@ -41,8 +41,13 @@ pub async fn retry_delivery_job(
     // Re-enqueue; outbox poller covers any XADD failure.
     if let Err(e) = queue::enqueue(&state.redis, &job.stream_name, &job.public_id).await {
         warn!(public_id = %job.public_id, "retry XADD failed, outbox poller will pick up: {e}");
-    } else if let Err(e) = repo.mark_enqueued(job.id).await {
-        warn!(public_id = %job.public_id, "mark_enqueued after retry failed: {e:?}");
+    } else {
+        if let Err(e) = queue::register_stream(&state.redis, &job.stream_name).await {
+            warn!(stream = %job.stream_name, "register_stream failed on retry: {e}");
+        }
+        if let Err(e) = repo.mark_enqueued(job.id).await {
+            warn!(public_id = %job.public_id, "mark_enqueued after retry failed: {e:?}");
+        }
     }
 
     info!(public_id = %job.public_id, "delivery job queued for retry");
