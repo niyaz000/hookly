@@ -29,17 +29,16 @@ async fn main() {
 
     info!(
         instance_id = %instance_id,
-        shard_count = scheduler_cfg.shard_count,
+        worker_count = scheduler_cfg.worker_count,
         "scheduler starting"
     );
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let mut set = JoinSet::new();
 
-    // One task per shard.
-    for shard_id in 0..scheduler_cfg.shard_count {
+    // Spawn N worker tasks. Each picks shards dynamically from sched:shards.
+    for _ in 0..scheduler_cfg.worker_count {
         set.spawn(shard::run(
-            shard_id,
             instance_id.clone(),
             scheduler_cfg.clone(),
             db.clone(),
@@ -48,7 +47,7 @@ async fn main() {
         ));
     }
 
-    // Reconciliation task runs independently of shard ownership.
+    // Reconciliation task runs independently of worker ownership.
     set.spawn(reconcile::run(
         scheduler_cfg.clone(),
         db.clone(),

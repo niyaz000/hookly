@@ -2,12 +2,11 @@ use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct SchedulerConfig {
-    /// Number of shards to manage. Each shard is an independent sorted set in Redis.
-    pub shard_count: i16,
-    /// How often each owned shard checks for due schedules.
-    pub tick_interval: Duration,
-    /// How often the heartbeat key is renewed (must be < shard ownership TTL of 30s).
-    pub heartbeat_interval: Duration,
+    /// Number of concurrent worker tasks. Each task competes for shards from
+    /// sched:shards on every iteration — no static shard assignment.
+    pub worker_count: u8,
+    /// How long a worker sleeps when sched:shards is empty before retrying.
+    pub idle_sleep: Duration,
     /// How often the reconciliation task re-syncs DB → Redis sorted sets.
     pub reconcile_interval: Duration,
 }
@@ -15,15 +14,14 @@ pub struct SchedulerConfig {
 impl Default for SchedulerConfig {
     fn default() -> Self {
         Self {
-            shard_count: env_i16("SCHEDULER_SHARD_COUNT", 4),
-            tick_interval: Duration::from_millis(env_u64("SCHEDULER_TICK_MS", 5_000)),
-            heartbeat_interval: Duration::from_millis(env_u64("SCHEDULER_HEARTBEAT_MS", 10_000)),
+            worker_count: env_u8("SCHEDULER_WORKER_COUNT", 4),
+            idle_sleep: Duration::from_millis(env_u64("SCHEDULER_IDLE_SLEEP_MS", 1_000)),
             reconcile_interval: Duration::from_millis(env_u64("SCHEDULER_RECONCILE_MS", 120_000)),
         }
     }
 }
 
-fn env_i16(key: &str, default: i16) -> i16 {
+fn env_u8(key: &str, default: u8) -> u8 {
     std::env::var(key)
         .ok()
         .and_then(|v| v.parse().ok())

@@ -28,6 +28,7 @@ return shard
 "#;
 
 const ROUTING_KEY: &str = "sched:routing";
+const SHARDS_KEY: &str = "sched:shards";
 
 fn pending_key(shard: i16) -> String {
     format!("sched:pending:{shard}")
@@ -104,6 +105,7 @@ impl ScheduleService {
             .await?;
 
         self.zadd_pending(row.assigned_shard, row.id, next_run_at).await;
+        self.zadd_shards(row.assigned_shard).await;
 
         info!(public_id = %row.public_id, shard = row.assigned_shard, "schedule created");
         Ok(ScheduleResponse::from(row))
@@ -175,6 +177,7 @@ impl ScheduleService {
         // If next_run_at changed, update the pending sorted set score.
         if let Some(ts) = row.next_run_at {
             self.zadd_pending(row.assigned_shard, row.id, ts).await;
+            self.zadd_shards(row.assigned_shard).await;
         }
 
         info!("schedule updated");
@@ -214,6 +217,7 @@ impl ScheduleService {
 
         if let Some(ts) = row.next_run_at {
             self.zadd_pending(row.assigned_shard, row.id, ts).await;
+            self.zadd_shards(row.assigned_shard).await;
         }
         self.zincrby_routing(row.assigned_shard, 1).await;
 
@@ -259,6 +263,7 @@ impl ScheduleService {
             })?;
         if let Some(ts) = row.next_run_at {
             self.zadd_pending(row.assigned_shard, row.id, ts).await;
+            self.zadd_shards(row.assigned_shard).await;
         }
         info!("schedule resumed");
         Ok(ScheduleResponse::from(row))
@@ -442,6 +447,24 @@ impl ScheduleService {
         };
         let _: Result<(), _> = conn
             .zrem(pending_key(shard), schedule_id.to_string())
+            .await;
+    }
+
+    // Adds the shard to the scheduler discovery set (sched:shards).
+    // Score = current unix_ms. GT flag means the score only moves forward,
+    // protecting against clock skew and ensuring workers see the latest version.
+    async fn zadd_shards(&self, shard: i16) {
+        let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await else {
+            warn!(shard, "redis unavailable; skipping ZADD sched:shards");
+            return;
+        };
+        let now_ms = Utc::now().timestamp_millis() as f64;
+        let _: Result<(), _> = redis::cmd("ZADD")
+            .arg(SHARDS_KEY)
+            .arg("GT")
+            .arg(now_ms)
+            .arg(shard.to_string())
+            .query_async(&mut conn)
             .await;
     }
 
