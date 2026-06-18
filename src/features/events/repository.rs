@@ -23,6 +23,7 @@ const BASE_SELECT: &str = r#"
         ev.organization_id,
         ev.payload,
         ev.idempotency_key,
+        ev.body_hash,
         ev.tags,
         ev.request_id,
         ev.created_by,
@@ -110,10 +111,6 @@ impl EventRepository {
         .map_err(AppError::from)
     }
 
-    /// Inserts an event with idempotency support.
-    ///
-    /// Returns `(row, true)` on a fresh insert, `(row, false)` when the
-    /// `idempotency_key` already exists for the application (existing row returned).
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
@@ -121,21 +118,19 @@ impl EventRepository {
         event_type_id: Uuid,
         endpoint_id: Option<Uuid>,
         payload: &serde_json::Value,
-        idempotency_key: Option<&str>,
         tags: &HashMap<String, String>,
+        idempotency_key: Option<&str>,
+        body_hash: Option<&[u8]>,
         ctx: RequestContext,
-    ) -> Result<(EventRow, bool), AppError> {
+    ) -> Result<EventRow, AppError> {
         let public_id = format!("evn_{}", NanoId::new());
 
-        let inserted_id: Option<Uuid> = sqlx::query_scalar(
+        sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO events
                (public_id, application_id, event_type_id, endpoint_id,
                 tenant_id, organization_id,
-                payload, idempotency_key, tags, request_id, created_by)
-               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::jsonb, $10, $11)
-               ON CONFLICT (application_id, idempotency_key)
-               WHERE idempotency_key IS NOT NULL
-               DO NOTHING
+                payload, idempotency_key, body_hash, tags, request_id, created_by)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11, $12)
                RETURNING id"#,
         )
         .bind(&public_id)
@@ -146,54 +141,41 @@ impl EventRepository {
         .bind(app.organization_id)
         .bind(Json(payload))
         .bind(idempotency_key)
+        .bind(body_hash)
         .bind(Json(tags))
         .bind(ctx.request_id)
         .bind(ctx.created_by)
-        .fetch_optional(&self.db)
+        .fetch_one(&self.db)
         .await?;
 
-        match inserted_id {
-            Some(_) => {
-                let row = self.get_by_id(&public_id).await?.ok_or_else(|| {
-                    AppError::Internal("event created but not found on fetch".into())
-                })?;
-                Ok((row, true))
-            }
-            None => {
-                // idempotency_key conflict — return the original event unchanged
-                let key = idempotency_key.expect("conflict implies idempotency_key is set");
-                let row = self
-                    .get_by_idempotency_key(app.id, key)
-                    .await?
-                    .ok_or_else(|| {
-                        AppError::Internal("idempotency conflict but original row not found".into())
-                    })?;
-                Ok((row, false))
-            }
-        }
+        self.get_by_id(&public_id).await?.ok_or_else(|| {
+            AppError::Internal("event created but not found on fetch".into())
+        })
+    }
+
+    /// Looks up an event by idempotency key within the 1-hour TTL window.
+    pub async fn find_by_idempotency_key(
+        &self,
+        application_id: Uuid,
+        key: &str,
+    ) -> Result<Option<EventRow>, AppError> {
+        let sql = format!(
+            "{} WHERE ev.application_id = $1 AND ev.idempotency_key = $2 \
+             AND ev.created_at > NOW() - INTERVAL '1 hour'",
+            BASE_SELECT
+        );
+        sqlx::query_as::<_, EventRow>(&sql)
+            .bind(application_id)
+            .bind(key)
+            .fetch_optional(&self.db)
+            .await
+            .map_err(AppError::from)
     }
 
     pub async fn get_by_id(&self, public_id: &str) -> Result<Option<EventRow>, AppError> {
         let sql = format!("{} WHERE ev.public_id = $1", BASE_SELECT);
         sqlx::query_as::<_, EventRow>(&sql)
             .bind(public_id)
-            .fetch_optional(&self.db)
-            .await
-            .map_err(AppError::from)
-    }
-
-    pub async fn get_by_idempotency_key(
-        &self,
-        application_id: Uuid,
-        idempotency_key: &str,
-    ) -> Result<Option<EventRow>, AppError> {
-        let sql = format!(
-            "{} WHERE ev.application_id = $1 AND ev.idempotency_key = $2",
-            BASE_SELECT
-        );
-        sqlx::query_as::<_, EventRow>(&sql)
-            .bind(application_id)
-            .bind(idempotency_key)
             .fetch_optional(&self.db)
             .await
             .map_err(AppError::from)
@@ -215,6 +197,7 @@ impl EventRepository {
             organization_id: Uuid,
             payload: Json<serde_json::Value>,
             idempotency_key: Option<String>,
+            body_hash: Option<Vec<u8>>,
             tags: Json<HashMap<String, String>>,
             request_id: Uuid,
             created_by: Uuid,
@@ -232,7 +215,7 @@ impl EventRepository {
                 ev.event_type_id,  et.public_id AS event_type_public_id, et.name AS event_type_name,
                 ev.endpoint_id,    ep.public_id AS endpoint_public_id,
                 ev.tenant_id, ev.organization_id,
-                ev.payload, ev.idempotency_key, ev.tags,
+                ev.payload, ev.idempotency_key, ev.body_hash, ev.tags,
                 ev.request_id, ev.created_by, ev.created_at,
                 COUNT(*) OVER() AS total_count
                FROM events ev
@@ -276,6 +259,7 @@ impl EventRepository {
                 organization_id: r.organization_id,
                 payload: r.payload,
                 idempotency_key: r.idempotency_key,
+                body_hash: r.body_hash,
                 tags: r.tags,
                 request_id: r.request_id,
                 created_by: r.created_by,

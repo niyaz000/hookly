@@ -35,22 +35,10 @@ pub async fn create_schedule(
     headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateScheduleRequest>,
 ) -> Result<(StatusCode, Json<ScheduleResponse>), AppError> {
-    if let Some(key) = idempotency::extract_key(&headers)? {
-        let hash = idempotency::body_hash(&payload);
-        let redis = state.redis.clone();
-        let schedule = idempotency::resolve(
-            &redis,
-            "schedules",
-            &key,
-            &hash,
-            move || async move { service(state).create(payload, ctx).await },
-        )
-        .await?;
-        return Ok((StatusCode::CREATED, Json(schedule)));
-    }
-
-    let schedule = service(state).create(payload, ctx).await?;
-    Ok((StatusCode::CREATED, Json(schedule)))
+    let idempotency_key = idempotency::extract_key(&headers)?;
+    let (schedule, created) = service(state).create(payload, ctx, idempotency_key.as_deref()).await?;
+    let status = if created { StatusCode::CREATED } else { StatusCode::OK };
+    Ok((status, Json(schedule)))
 }
 
 pub async fn get_schedule(

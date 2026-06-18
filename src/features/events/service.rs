@@ -16,7 +16,7 @@ fn events_counter() -> &'static Counter<u64> {
     })
 }
 
-use crate::common::{types::{PaginatedResponse, RequestContext}, validators};
+use crate::common::{idempotency, types::{PaginatedResponse, RequestContext}, validators};
 use crate::error::AppError;
 use crate::features::delivery::repository::DeliveryRepository;
 use crate::features::events::models::{CreateEventRequest, EventResponse, ListQueryParams};
@@ -81,23 +81,17 @@ impl EventService {
         }
     }
 
-    /// Creates an event. Returns `(response, true)` for a fresh insert and
-    /// `(response, false)` when the `idempotency_key` already exists (replay).
+    /// Creates an event. Returns `(response, true)` on a fresh insert and
+    /// `(response, false)` on an idempotent replay.
     #[tracing::instrument(skip(self, req, ctx), fields(application_id = %req.application_id))]
     pub async fn create(
         &self,
         req: CreateEventRequest,
         ctx: RequestContext,
+        idempotency_key: Option<&str>,
     ) -> Result<(EventResponse, bool), AppError> {
         Self::validate_payload(&req.payload)?;
         validators::validate_tags(&req.tags)?;
-        if let Some(k) = &req.idempotency_key {
-            if k.is_empty() || k.len() > 256 {
-                return Err(AppError::BadRequest(
-                    "idempotency_key must be between 1 and 256 chars".into(),
-                ));
-            }
-        }
 
         let app = self
             .repo
@@ -132,36 +126,62 @@ impl EventService {
                 ))
             })?;
 
-        info!("creating event");
-        let (row, created) = self
-            .repo
-            .create(
-                app,
-                et.id,
-                Some(ep.id),
-                &req.payload,
-                req.idempotency_key.as_deref(),
-                &req.tags,
-                ctx,
-            )
-            .await?;
+        if let Some(key) = idempotency_key {
+            let hash = idempotency::body_hash_bytes(&req);
+            let lock_token = idempotency::acquire_lock(&self.redis, "events", key).await?;
 
-        if created {
-            info!(public_id = %row.public_id, "event created");
-            self.enqueue_delivery(row.id, ep.id, row.organization_id)
-                .await;
-            events_counter().add(
-                1,
-                &[
-                    KeyValue::new("tenant_id", row.tenant_id.to_string()),
-                    KeyValue::new("application_id", req.application_id.clone()),
-                ],
-            );
-        } else {
-            info!(public_id = %row.public_id, "idempotent replay, returning existing event");
+            let result: Result<(EventResponse, bool), AppError> =
+                match self.repo.find_by_idempotency_key(app.id, key).await {
+                    Ok(Some(row)) => {
+                        if row.body_hash.as_deref() == Some(hash.as_slice()) {
+                            info!(public_id = %row.public_id, "idempotent replay");
+                            Ok((EventResponse::from(row), false))
+                        } else {
+                            Err(AppError::Conflict(
+                                "Idempotency key already used with a different request body"
+                                    .into(),
+                                vec![],
+                            ))
+                        }
+                    }
+                    Ok(None) => {
+                        info!("creating event");
+                        match self
+                            .repo
+                            .create(app, et.id, Some(ep.id), &req.payload, &req.tags, Some(key), Some(&hash), ctx)
+                            .await
+                        {
+                            Ok(row) => {
+                                info!(public_id = %row.public_id, "event created");
+                                self.enqueue_delivery(row.id, ep.id, row.organization_id).await;
+                                events_counter().add(1, &[
+                                    KeyValue::new("tenant_id", row.tenant_id.to_string()),
+                                    KeyValue::new("application_id", req.application_id.clone()),
+                                ]);
+                                Ok((EventResponse::from(row), true))
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                    Err(e) => Err(e),
+                };
+
+            idempotency::release_lock(&self.redis, "events", key, &lock_token).await;
+            return result;
         }
 
-        Ok((EventResponse::from(row), created))
+        info!("creating event");
+        let row = self
+            .repo
+            .create(app, et.id, Some(ep.id), &req.payload, &req.tags, None, None, ctx)
+            .await?;
+        info!(public_id = %row.public_id, "event created");
+        self.enqueue_delivery(row.id, ep.id, row.organization_id).await;
+        events_counter().add(1, &[
+            KeyValue::new("tenant_id", row.tenant_id.to_string()),
+            KeyValue::new("application_id", req.application_id.clone()),
+        ]);
+        Ok((EventResponse::from(row), true))
     }
 
     #[tracing::instrument(skip(self))]

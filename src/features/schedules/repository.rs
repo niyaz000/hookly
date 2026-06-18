@@ -10,9 +10,11 @@ use super::models::{ScheduleExecutionRow, ScheduleRow, UpdateScheduleRequest};
 const SCHEDULE_SELECT: &str = r#"
     SELECT
         s.id, s.public_id, s.name, s.description,
+        s.application_id,
         s.tenant_id, s.organization_id, s.event_type_id,
         s.payload, s.cron_expression, s.timezone, s.status,
         s.next_run_at, s.last_run_at, s.last_run_status,
+        s.idempotency_key, s.body_hash,
         s.created_by, s.updated_by, s.request_id, s.version,
         s.created_at, s.updated_at, s.deleted_at, s.assigned_shard,
         et.public_id AS event_type_public_id,
@@ -35,6 +37,16 @@ pub struct ScheduleRepository {
 impl ScheduleRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
+    }
+
+    pub async fn resolve_application(&self, public_id: &str) -> Result<Option<Uuid>, AppError> {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM applications WHERE public_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(AppError::from)
     }
 
     pub async fn resolve_tenant(&self, public_id: &str) -> Result<Option<Uuid>, AppError> {
@@ -145,6 +157,24 @@ impl ScheduleRepository {
             .map_err(AppError::from)
     }
 
+    pub async fn find_by_idempotency_key(
+        &self,
+        application_id: Uuid,
+        key: &str,
+    ) -> Result<Option<ScheduleRow>, AppError> {
+        let sql = format!(
+            "{} WHERE s.application_id = $1 AND s.idempotency_key = $2 \
+             AND s.created_at > NOW() - INTERVAL '1 hour' AND s.deleted_at IS NULL {}",
+            SCHEDULE_SELECT, SCHEDULE_GROUP_BY
+        );
+        sqlx::query_as::<_, ScheduleRow>(&sql)
+            .bind(application_id)
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(AppError::from)
+    }
+
     // --- CRUD ---
 
     #[allow(clippy::too_many_arguments)]
@@ -152,6 +182,7 @@ impl ScheduleRepository {
         &self,
         name: &str,
         description: Option<&str>,
+        application_id: Uuid,
         tenant_id: Uuid,
         organization_id: Uuid,
         event_type_id: Uuid,
@@ -161,6 +192,8 @@ impl ScheduleRepository {
         timezone: &str,
         next_run_at: Option<DateTime<Utc>>,
         assigned_shard: i16,
+        idempotency_key: Option<&str>,
+        body_hash: Option<&[u8]>,
         ctx: RequestContext,
     ) -> Result<ScheduleRow, AppError> {
         let id = Uuid::now_v7();
@@ -174,17 +207,19 @@ impl ScheduleRepository {
             r#"
             INSERT INTO schedules (
                 id, public_id, name, description,
-                tenant_id, organization_id, event_type_id,
+                application_id, tenant_id, organization_id, event_type_id,
                 payload, cron_expression, timezone,
                 next_run_at, assigned_shard,
+                idempotency_key, body_hash,
                 created_by, updated_by, request_id,
                 version, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4,
-                $5, $6, $7,
-                $8, $9, $10,
-                $11, $12,
-                $13, $13, $14,
+                $5, $6, $7, $8,
+                $9, $10, $11,
+                $12, $13,
+                $14, $15,
+                $16, $16, $17,
                 1, NOW(), NOW()
             )
             "#,
@@ -193,6 +228,7 @@ impl ScheduleRepository {
         .bind(&public_id)
         .bind(name)
         .bind(description)
+        .bind(application_id)
         .bind(tenant_id)
         .bind(organization_id)
         .bind(event_type_id)
@@ -201,6 +237,8 @@ impl ScheduleRepository {
         .bind(timezone)
         .bind(next_run_at)
         .bind(assigned_shard)
+        .bind(idempotency_key)
+        .bind(body_hash)
         .bind(ctx.created_by)
         .bind(ctx.request_id)
         .execute(&mut *tx)

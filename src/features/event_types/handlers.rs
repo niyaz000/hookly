@@ -1,12 +1,11 @@
 use axum::{
     extract::{Extension, Path, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     Json,
 };
 
 use crate::{
     common::{
-        idempotency,
         qs_query::QsQuery,
         types::{PaginatedResponse, RequestContext},
         validators,
@@ -31,23 +30,8 @@ fn svc(state: AppState) -> EventTypeService {
 pub async fn create_event_type(
     State(state): State<AppState>,
     Extension(ctx): Extension<RequestContext>,
-    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateEventTypeRequest>,
 ) -> Result<(StatusCode, Json<EventTypeResponse>), AppError> {
-    if let Some(key) = idempotency::extract_key(&headers)? {
-        let hash = idempotency::body_hash(&payload);
-        let redis = state.redis.clone();
-        let et = idempotency::resolve(
-            &redis,
-            "event_types",
-            &key,
-            &hash,
-            move || async move { svc(state).create(payload, ctx).await },
-        )
-        .await?;
-        return Ok((StatusCode::CREATED, Json(et)));
-    }
-
     let et = svc(state).create(payload, ctx).await?;
     Ok((StatusCode::CREATED, Json(et)))
 }
@@ -56,26 +40,8 @@ pub async fn create_version(
     State(state): State<AppState>,
     Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
-    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateVersionRequest>,
 ) -> Result<(StatusCode, Json<EventTypeResponse>), AppError> {
-    if let Some(key) = idempotency::extract_key(&headers)? {
-        let hash = idempotency::body_hash(&payload);
-        let redis = state.redis.clone();
-        let ns = format!("event_type_versions:{}", public_id);
-        let et = idempotency::resolve(
-            &redis,
-            &ns,
-            &key,
-            &hash,
-            move || async move {
-                svc(state).create_version(public_id, payload, ctx).await
-            },
-        )
-        .await?;
-        return Ok((StatusCode::CREATED, Json(et)));
-    }
-
     let et = svc(state).create_version(public_id, payload, ctx).await?;
     Ok((StatusCode::CREATED, Json(et)))
 }

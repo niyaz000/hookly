@@ -1,11 +1,11 @@
 use axum::{
     extract::{Extension, Path, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     Json,
 };
 
 use crate::{
-    common::{idempotency, qs_query::QsQuery, types::RequestContext, validators, ValidatedJson},
+    common::{qs_query::QsQuery, types::RequestContext, validators, ValidatedJson},
     error::AppError,
     features::{
         permissions::repository::PermissionRepository,
@@ -33,19 +33,8 @@ fn service(state: AppState) -> TenantService {
 pub async fn create_tenant(
     State(state): State<AppState>,
     Extension(ctx): Extension<RequestContext>,
-    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateTenantRequest>,
 ) -> Result<(StatusCode, Json<TenantResponse>), AppError> {
-    if let Some(key) = idempotency::extract_key(&headers)? {
-        let hash = idempotency::body_hash(&payload);
-        let redis = state.redis.clone();
-        let tenant = idempotency::resolve(&redis, "tenants", &key, &hash, move || async move {
-            service(state).create(payload, ctx).await
-        })
-        .await?;
-        return Ok((StatusCode::CREATED, Json(tenant)));
-    }
-
     let tenant = service(state).create(payload, ctx).await?;
     Ok((StatusCode::CREATED, Json(tenant)))
 }

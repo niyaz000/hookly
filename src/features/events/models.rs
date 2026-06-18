@@ -23,6 +23,7 @@ pub struct EventRow {
     pub organization_id: Uuid,
     pub payload: Json<serde_json::Value>,
     pub idempotency_key: Option<String>,
+    pub body_hash: Option<Vec<u8>>,
     pub tags: Json<HashMap<String, String>>,
     pub request_id: Uuid,
     pub created_by: Uuid,
@@ -37,7 +38,6 @@ pub struct CreateEventRequest {
     pub event_type_id: String,
     pub endpoint_id: String,
     pub payload: serde_json::Value,
-    pub idempotency_key: Option<String>,
     #[serde(default)]
     pub tags: HashMap<String, String>,
 }

@@ -1,12 +1,11 @@
 use axum::{
     extract::{Extension, Path, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     Json,
 };
 
 use crate::{
     common::{
-        idempotency,
         types::RequestContext,
         validators,
         ValidatedJson,
@@ -23,27 +22,8 @@ use crate::{
 pub async fn create_application(
     State(state): State<AppState>,
     Extension(ctx): Extension<RequestContext>,
-    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateApplicationRequest>,
 ) -> Result<(StatusCode, Json<CreateApplicationResponse>), AppError> {
-    if let Some(key) = idempotency::extract_key(&headers)? {
-        let hash = idempotency::body_hash(&payload);
-        let redis = state.redis.clone();
-        let resp = idempotency::resolve(
-            &redis,
-            "applications",
-            &key,
-            &hash,
-            move || async move {
-                let svc = ApplicationService::new(ApplicationRepository::new(state.db));
-                let app = svc.create(payload, ctx).await?;
-                Ok(CreateApplicationResponse::from(app))
-            },
-        )
-        .await?;
-        return Ok((StatusCode::CREATED, Json(resp)));
-    }
-
     let svc = ApplicationService::new(ApplicationRepository::new(state.db));
     let app = svc.create(payload, ctx).await?;
     Ok((StatusCode::CREATED, Json(CreateApplicationResponse::from(app))))

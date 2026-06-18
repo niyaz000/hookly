@@ -5,11 +5,19 @@ Accepted
 
 ## Context
 
-Webhook delivery infrastructure is operated over unreliable networks. A client creating an endpoint, submitting an event, or triggering an action can't always distinguish "the request failed" from "the request succeeded but the response was lost." Without idempotency, the correct recovery strategy — retry — becomes dangerous: it may create duplicate resources or fire duplicate actions.
+Webhook delivery infrastructure is operated over unreliable networks. A client creating an
+event or a schedule can't always distinguish "the request failed" from "the request succeeded
+but the response was lost." Without idempotency, the correct recovery strategy — retry —
+becomes dangerous: a duplicate event fires a webhook twice; a duplicate schedule registers
+conflicting cron entries.
 
-Idempotency keys give clients a safe retry primitive: the server tracks whether a request with a given key has already been executed and, if so, returns the original response without re-executing.
+Idempotency keys give clients a safe retry primitive: the server tracks whether a request
+with a given key has already been executed and, if so, returns the original result without
+re-executing.
 
-The OASIS Repeatable Requests v1.0 spec (endorsed by Microsoft's API guidelines) defines `Repeatability-Request-ID` + `Repeatability-First-Sent` headers. Stripe popularized a simpler single-header convention (`Idempotency-Key`) that is now widely known across the developer ecosystem.
+Stripe popularized the single-header `Idempotency-Key` convention that is now the de facto
+standard across the developer ecosystem. The OASIS Repeatable Requests v1.0 spec defines an
+alternative two-header format (`Repeatability-Request-ID` + `Repeatability-First-Sent`).
 
 ## Decision
 
@@ -27,20 +35,27 @@ Idempotency-Key: <client-generated-string>
 
 ### Scope
 
-Idempotency keys are **opt-in per handler**. Not every endpoint supports them. Handlers that do not read the `Idempotency-Key` header ignore it silently. The API documentation for each endpoint states whether the header is supported.
+Idempotency is supported on **events** and **schedules** only:
 
-Supported on: all state-mutating `POST` endpoints (creates and actions).
-Not supported on: `GET`, `DELETE`, `PUT`, `PATCH`.
+| Endpoint | Supported |
+|---|---|
+| `POST /api/v1/events` | Yes — duplicate create fires a webhook twice |
+| `POST /api/v1/schedules` | Yes — duplicate create registers conflicting cron entries |
+| All other `POST` endpoints | No — header silently ignored |
+| `GET`, `DELETE`, `PUT`, `PATCH` | No — not applicable |
+
+All other `POST` handlers ignore the header silently. The API documentation for each
+endpoint states whether the header is supported.
 
 ### Replay semantics
 
-**Same key, same body → cached response:**
+**Same key, same body → replay (no re-execution):**
 ```
-Client sends: POST /applications  { "name": "My App" }  Idempotency-Key: abc123
-Server responds: 201 Created  { "id": "app_..." }
+Client sends: POST /api/v1/events  { "event_type_id": "...", "payload": {...} }  Idempotency-Key: abc123
+Server responds: 201 Created  { "id": "evn_..." }
 
 Client retries (same key, same body):
-Server responds: 201 Created  { "id": "app_..." }  ← cached, no second insert
+Server responds: 200 OK  { "id": "evn_..." }  ← same entity row, no second insert
 ```
 
 **Same key, different body → 409 Conflict:**
@@ -59,34 +74,58 @@ Server responds: 201 Created  { "id": "app_..." }  ← cached, no second insert
 }
 ```
 
+**Key reuse after 1-hour window → treated as a new request:**
+A key used more than 1 hour ago is no longer in the lookup window. The next request with
+that key executes fresh. Keys should be unique per operation — UUIDv4 or UUIDv7 is
+recommended to eliminate any reuse risk.
+
+### Durability
+
+Idempotency is a **core guarantee**, not best-effort. The idempotency record is stored on
+the entity row in PostgreSQL — the same durability as the entity itself. A Redis outage
+affects only the concurrent-request lock (in-flight protection); completed records in
+PostgreSQL are unaffected.
+
 ## Principles upheld
 
-- **Reliability through simplicity** — clients can always retry a failed request safely; no duplicate resource creation; no duplicate delivery triggers
-- **Developer experience** — `Idempotency-Key` is a Stripe convention known to the majority of API developers; single header, no timestamp companion required
-- **Battle-tested components** — Redis `SET NX PX` + Lua release is a well-understood distributed locking pattern; no novel consensus primitive
+- **Reliability through simplicity** — clients can always retry a failed request safely;
+  no duplicate resource creation; no duplicate delivery triggers
+- **Developer experience** — `Idempotency-Key` is the Stripe convention known to the
+  majority of API developers; single header, no timestamp companion required
+- **Focused scope** — only the two entities where duplicate creates have irreversible
+  side effects carry idempotency overhead; all other handlers are unaffected
 
 ## Alternatives considered
 
 | Alternative | Why rejected |
 |---|---|
 | OASIS `Repeatability-Request-ID` + `Repeatability-First-Sent` headers | Two headers instead of one; `Repeatability-First-Sent` (timestamp) adds validation complexity for no additional correctness guarantee in our use case |
-| Database-backed idempotency store (PostgreSQL) | Higher write latency than Redis; requires a transaction for lock + record atomicity; adds DB write load on what should be a fast read path |
-| 5-minute TTL (MS minimum) | Insufficient for webhook delivery scenarios where a client may retry an event submission minutes later; 24 hours matches the real retry window for infrastructure integrations |
-| Enforce idempotency key on all POST endpoints globally | Too restrictive — health checks, auth flows, and read-only POST actions don't need it; opt-in per handler keeps the mechanism purposeful |
+| Apply to all state-mutating POST endpoints | Creates, updates, and soft-deletes on non-core entities (applications, endpoints, invites) are idempotent enough by nature — same name or URL produces an obvious conflict, not a silent duplicate. Adding idempotency overhead to every handler for no safety benefit. |
+| Redis-only storage (no PostgreSQL) | Volatile: node crash or eviction loses all records → silent duplicate execution. RAM is ~100× more expensive than disk per GB. Entity-level columns in PostgreSQL are durable and cost nothing additional. |
+| Configurable TTL | Adds an env var and operational surface for no real benefit. Clients aren't tuning retry window granularity below hours. Fixed 24 hours matches Stripe and covers all automated retry scenarios. |
+| Forever deduplication (unique constraint, no TTL) | Prevents key reuse after the resource is deleted months later. A client rotating keys on a schedule (or reusing short keys) would hit stale 409s with no clear expiry. 24-hour window is sufficient and predictable. |
+| Body field `idempotency_key` in request JSON | Mixes idempotency identity into the resource model. Standard practice (Stripe, Square, Adyen) is to separate it as a header. Also produces two competing idempotency mechanisms if both a header and a body field are present. |
 
 ## Consequences
 
 **Positive:**
-- Clients can retry any idempotent POST safely without fear of duplicates
-- Body hash comparison catches accidental key reuse with different payloads
-- 24-hour window covers overnight retries and delayed automation pipelines
+- Clients can retry any event or schedule create safely without fear of duplicates
+- Body hash comparison catches accidental key reuse with different payloads → 409
+- 1-hour window covers all automated retry windows — Hookly clients are code-level retriers, not overnight batch jobs
+- No extra infrastructure — idempotency durability is inherited from the entity table
 - Lock TTL of 60 seconds caps the concurrent-request block window
 
 **Negative:**
-- Redis is a required dependency for idempotency — a Redis outage degrades idempotency protection (requests proceed but replay is unavailable)
-- 24-hour record retention in Redis adds memory pressure on high-volume endpoints; keys should be short and namespaced to contain growth
-- No idempotency protection on endpoints that don't opt in — handlers must explicitly wire the `idempotency::resolve` call
+- Redis is required for concurrent-request protection — a Redis outage allows duplicate
+  concurrent requests through; the SELECT-before-INSERT catches most duplicates once the
+  first request completes, but is not a perfect substitute for the lock
+- 1-hour replay window means a key can't be safely reused for a different operation within
+  that window (use UUIDv4/v7 to make reuse a non-issue)
+- Only events and schedules are protected; other endpoints offer no idempotency guarantee
 
 ## Implementation
 
-For body hashing, Redis storage layout, lock protocol, and failure semantics see [docs/architecture/idempotency.md](../../architecture/idempotency.md).
+For storage schema, request flow, lock protocol, and failure semantics see
+[docs/architecture/idempotency.md](../../architecture/idempotency.md).
+For storage backend rationale and alternatives see
+[docs/decisions/database/004-idempotency-storage.md](../database/004-idempotency-storage.md).

@@ -9,8 +9,7 @@ use crate::{
         idempotency,
         qs_query::QsQuery,
         types::{PaginatedResponse, RequestContext},
-        validators,
-        ValidatedJson,
+        validators, ValidatedJson,
     },
     error::AppError,
     features::{
@@ -38,24 +37,8 @@ pub async fn create_event(
     headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateEventRequest>,
 ) -> Result<(StatusCode, Json<EventResponse>), AppError> {
-    if let Some(key) = idempotency::extract_key(&headers)? {
-        let hash = idempotency::body_hash(&payload);
-        let redis = state.redis.clone();
-        let ev = idempotency::resolve(
-            &redis,
-            "events",
-            &key,
-            &hash,
-            move || async move {
-                let (ev, _) = svc(state).create(payload, ctx).await?;
-                Ok(ev)
-            },
-        )
-        .await?;
-        return Ok((StatusCode::CREATED, Json(ev)));
-    }
-
-    let (ev, created) = svc(state).create(payload, ctx).await?;
+    let idempotency_key = idempotency::extract_key(&headers)?;
+    let (ev, created) = svc(state).create(payload, ctx, idempotency_key.as_deref()).await?;
     let status = if created { StatusCode::CREATED } else { StatusCode::OK };
     Ok((status, Json(ev)))
 }

@@ -16,6 +16,7 @@ pub struct ScheduleRow {
     pub public_id: String,
     pub name: String,
     pub description: Option<String>,
+    pub application_id: Option<Uuid>,
     pub tenant_id: Uuid,
     pub organization_id: Uuid,
     pub event_type_id: Uuid,
@@ -26,6 +27,8 @@ pub struct ScheduleRow {
     pub next_run_at: Option<DateTime<Utc>>,
     pub last_run_at: Option<DateTime<Utc>>,
     pub last_run_status: Option<String>,
+    pub idempotency_key: Option<String>,
+    pub body_hash: Option<Vec<u8>>,
     pub created_by: Uuid,
     pub updated_by: Uuid,
     pub request_id: Uuid,
@@ -63,6 +66,7 @@ pub struct CreateScheduleRequest {
     #[validate(length(max = 255, message = "name must be 255 characters or fewer"))]
     pub name: String,
     pub description: Option<String>,
+    pub application_id: String,
     pub tenant_id: String,
     pub organization_id: String,
     #[validate(custom(function = "validate_not_blank", message = "event_type_id is required"))]

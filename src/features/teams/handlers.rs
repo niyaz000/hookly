@@ -1,12 +1,11 @@
 use axum::{
     extract::{Extension, Path, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     Json,
 };
 
 use crate::{
     common::{
-        idempotency,
         qs_query::QsQuery,
         types::RequestContext,
         validators,
@@ -31,23 +30,8 @@ fn service(state: AppState) -> TeamService {
 pub async fn create_team(
     State(state): State<AppState>,
     Extension(ctx): Extension<RequestContext>,
-    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<CreateTeamRequest>,
 ) -> Result<(StatusCode, Json<TeamResponse>), AppError> {
-    if let Some(key) = idempotency::extract_key(&headers)? {
-        let hash = idempotency::body_hash(&payload);
-        let redis = state.redis.clone();
-        let team = idempotency::resolve(
-            &redis,
-            "teams",
-            &key,
-            &hash,
-            move || async move { service(state).create(payload, ctx).await },
-        )
-        .await?;
-        return Ok((StatusCode::CREATED, Json(team)));
-    }
-
     let team = service(state).create(payload, ctx).await?;
     Ok((StatusCode::CREATED, Json(team)))
 }
@@ -101,26 +85,8 @@ pub async fn add_team_members(
     State(state): State<AppState>,
     Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
-    headers: HeaderMap,
     ValidatedJson(payload): ValidatedJson<AddTeamMembersRequest>,
 ) -> Result<Json<Vec<TeamMemberResponse>>, AppError> {
-    if let Some(key) = idempotency::extract_key(&headers)? {
-        let hash = idempotency::body_hash(&payload);
-        let redis = state.redis.clone();
-        let ns = format!("team_members:{}", public_id);
-        let members = idempotency::resolve(
-            &redis,
-            &ns,
-            &key,
-            &hash,
-            move || async move {
-                service(state).add_members(public_id, payload, ctx).await
-            },
-        )
-        .await?;
-        return Ok(Json(members));
-    }
-
     let members = service(state).add_members(public_id, payload, ctx).await?;
     Ok(Json(members))
 }

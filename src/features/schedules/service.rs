@@ -6,7 +6,7 @@ use std::str::FromStr;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::{common::types::RequestContext, error::AppError};
+use crate::{common::{idempotency, types::RequestContext}, error::AppError};
 
 use super::{
     models::{
@@ -49,13 +49,21 @@ impl ScheduleService {
         &self,
         req: CreateScheduleRequest,
         ctx: RequestContext,
-    ) -> Result<ScheduleResponse, AppError> {
+        idempotency_key: Option<&str>,
+    ) -> Result<(ScheduleResponse, bool), AppError> {
         req.validate()?;
 
         let timezone = req.timezone.as_deref().unwrap_or("UTC");
         let next_run_at = compute_next_run_at(&req.cron_expression, timezone)?;
 
-        info!("creating schedule");
+        let application_id = self
+            .repo
+            .resolve_application(&req.application_id)
+            .await?
+            .ok_or_else(|| {
+                warn!(application_id = %req.application_id, "application not found");
+                AppError::NotFound(format!("Application not found: {}", req.application_id))
+            })?;
 
         let tenant_id = self
             .repo
@@ -86,11 +94,70 @@ impl ScheduleService {
 
         let assigned_shard = self.pick_shard(tenant_id).await?;
 
+        if let Some(key) = idempotency_key {
+            let hash = idempotency::body_hash_bytes(&req);
+            let lock_token = idempotency::acquire_lock(&self.redis, "schedules", key).await?;
+
+            let result: Result<(ScheduleResponse, bool), AppError> =
+                match self.repo.find_by_idempotency_key(application_id, key).await {
+                    Ok(Some(row)) => {
+                        if row.body_hash.as_deref() == Some(hash.as_slice()) {
+                            info!(public_id = %row.public_id, "idempotent replay");
+                            Ok((ScheduleResponse::from(row), false))
+                        } else {
+                            Err(AppError::Conflict(
+                                "Idempotency key already used with a different request body"
+                                    .into(),
+                                vec![],
+                            ))
+                        }
+                    }
+                    Ok(None) => {
+                        info!("creating schedule");
+                        match self
+                            .repo
+                            .create(
+                                &req.name,
+                                req.description.as_deref(),
+                                application_id,
+                                tenant_id,
+                                organization_id,
+                                event_type_id,
+                                &endpoint_ids,
+                                &req.payload,
+                                &req.cron_expression,
+                                timezone,
+                                Some(next_run_at),
+                                assigned_shard,
+                                Some(key),
+                                Some(&hash),
+                                ctx,
+                            )
+                            .await
+                        {
+                            Ok(row) => {
+                                self.zadd_pending(row.assigned_shard, row.id, next_run_at).await;
+                                self.zadd_shards(row.assigned_shard).await;
+                                info!(public_id = %row.public_id, shard = row.assigned_shard, "schedule created");
+                                Ok((ScheduleResponse::from(row), true))
+                            }
+                            Err(e) => Err(e),
+                        }
+                    }
+                    Err(e) => Err(e),
+                };
+
+            idempotency::release_lock(&self.redis, "schedules", key, &lock_token).await;
+            return result;
+        }
+
+        info!("creating schedule");
         let row = self
             .repo
             .create(
                 &req.name,
                 req.description.as_deref(),
+                application_id,
                 tenant_id,
                 organization_id,
                 event_type_id,
@@ -100,6 +167,8 @@ impl ScheduleService {
                 timezone,
                 Some(next_run_at),
                 assigned_shard,
+                None,
+                None,
                 ctx,
             )
             .await?;
@@ -108,7 +177,7 @@ impl ScheduleService {
         self.zadd_shards(row.assigned_shard).await;
 
         info!(public_id = %row.public_id, shard = row.assigned_shard, "schedule created");
-        Ok(ScheduleResponse::from(row))
+        Ok((ScheduleResponse::from(row), true))
     }
 
     #[tracing::instrument(skip(self))]
