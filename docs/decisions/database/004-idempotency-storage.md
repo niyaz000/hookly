@@ -317,7 +317,7 @@ either way.
 | + Key reuse after TTL window works naturally | |
 
 **Key scope per entity type** is actually desirable: an idempotency key submitted to
-`POST /events` cannot collide with one submitted to `POST /endpoints`, even if the
+`POST /events` cannot collide with one submitted to `POST /schedules`, even if the
 string is identical. Each entity table enforces its own uniqueness.
 
 ---

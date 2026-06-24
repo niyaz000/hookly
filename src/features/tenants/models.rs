@@ -23,6 +23,7 @@ pub struct Tenant {
     pub id: Uuid,
     pub public_id: String,
     pub organization_id: Uuid,
+    pub organization_public_id: String,
     pub name: String,
     pub description: Option<String>,
     pub status: TenantStatus,
@@ -75,13 +76,11 @@ impl UpdateTenantRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TenantResponse {
     pub id: String,
-    pub organization_id: Uuid,
+    pub organization_id: String,
     pub name: String,
     pub description: Option<String>,
     pub status: TenantStatus,
     pub tags: HashMap<String, String>,
-    pub metadata: HashMap<String, String>,
-    pub settings: HashMap<String, String>,
     pub created_by: Uuid,
     pub updated_by: Uuid,
     pub created_at: DateTime<Utc>,
@@ -92,13 +91,11 @@ impl From<Tenant> for TenantResponse {
     fn from(t: Tenant) -> Self {
         Self {
             id: t.public_id,
-            organization_id: t.organization_id,
+            organization_id: t.organization_public_id,
             name: t.name,
             description: t.description,
             status: t.status,
             tags: t.tags.0,
-            metadata: t.metadata.0,
-            settings: t.settings.0,
             created_by: t.created_by,
             updated_by: t.updated_by,
             created_at: t.created_at,

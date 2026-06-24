@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "application_state", rename_all = "SCREAMING_SNAKE_CASE")]
+#[serde(rename_all = "lowercase")]
 pub enum ApplicationState {
     Active,
     Suspended,
@@ -18,7 +19,11 @@ pub struct Application {
     pub id: Uuid,
     pub public_id: String,
     pub organization_id: Uuid,
+    pub organization_public_id: String,
     pub tenant_id: Uuid,
+    pub tenant_public_id: String,
+    pub environment_id: Option<Uuid>,
+    pub environment_public_id: Option<String>,
     pub name: String,
     pub description: String,
     pub tags: Json<HashMap<String, String>>,
@@ -32,6 +37,7 @@ pub struct Application {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateApplicationRequest {
     pub tenant_id: String,
+    pub environment_id: String,
     pub name: String,
     pub description: String,
     pub tags: HashMap<String, String>,
@@ -40,8 +46,9 @@ pub struct CreateApplicationRequest {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateApplicationResponse {
     pub id: String,
-    pub tenant_id: Uuid,
-    pub organization_id: Uuid,
+    pub tenant_id: String,
+    pub organization_id: String,
+    pub environment_id: String,
     pub name: String,
     pub description: String,
     pub tags: HashMap<String, String>,
@@ -55,8 +62,9 @@ pub struct CreateApplicationResponse {
 #[derive(Serialize, Debug)]
 pub struct GetApplicationResponse {
     pub id: String,
-    pub tenant_id: Uuid,
-    pub organization_id: Uuid,
+    pub tenant_id: String,
+    pub organization_id: String,
+    pub environment_id: String,
     pub name: String,
     pub description: String,
     pub tags: HashMap<String, String>,
@@ -71,8 +79,9 @@ impl From<Application> for CreateApplicationResponse {
     fn from(app: Application) -> Self {
         Self {
             id: app.public_id,
-            tenant_id: app.tenant_id,
-            organization_id: app.organization_id,
+            tenant_id: app.tenant_public_id,
+            organization_id: app.organization_public_id,
+            environment_id: app.environment_public_id.unwrap_or_default(),
             name: app.name,
             description: app.description,
             tags: app.tags.0,
@@ -89,8 +98,9 @@ impl From<Application> for GetApplicationResponse {
     fn from(app: Application) -> Self {
         Self {
             id: app.public_id,
-            tenant_id: app.tenant_id,
-            organization_id: app.organization_id,
+            tenant_id: app.tenant_public_id,
+            organization_id: app.organization_public_id,
+            environment_id: app.environment_public_id.unwrap_or_default(),
             name: app.name,
             description: app.description,
             tags: app.tags.0,

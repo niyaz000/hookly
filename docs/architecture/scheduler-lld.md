@@ -12,15 +12,15 @@
 │  Each instance spawns N worker tasks that pick shards dynamically.   │
 │                                                                      │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                │
-│  │  worker 0    │  │  worker 1    │  │  worker N    │  ← N tasks,   │
-│  │              │  │              │  │              │    no fixed   │
-│  │ loop:        │  │ loop:        │  │ loop:        │    shard      │
-│  │  ① pick     │  │  ① pick     │  │  ① pick     │                │
-│  │  ② lock NX  │  │  ② lock NX  │  │  ② lock NX  │                │
-│  │  ③ poll due │  │  ③ poll due │  │  ③ poll due │                │
-│  │  ④ fire or  │  │  ④ fire or  │  │  ④ fire or  │                │
+│  │  worker 0    │  │  worker 1    │  │  worker N    │  ← N tasks,    │
+│  │              │  │              │  │              │    no fixed    │
+│  │ loop:        │  │ loop:        │  │ loop:        │    shard       │
+│  │  ① pick     │  │  ① pick      │   │  ① pick     │               │
+│  │  ② lock NX  │  │  ② lock NX   │   │  ② lock NX  │               │
+│  │  ③ poll due │  │  ③ poll due  │   │  ③ poll due │               │
+│  │  ④ fire or  │  │  ④ fire or   │   │  ④ fire or  │               │
 │  │    remove    │  │    remove    │  │    remove    │                │
-│  │  ⑤ unlock   │  │  ⑤ unlock   │  │  ⑤ unlock   │                │
+│  │  ⑤ unlock   │  │  ⑤ unlock    │  │  ⑤ unlock   │                │
 │  └──────┬───────┘  └──────────────┘  └──────────────┘                │
 │         │                                                            │
 │  ┌──────▼──────────────────────────────────────────────────────┐     │

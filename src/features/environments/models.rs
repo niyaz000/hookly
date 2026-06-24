@@ -34,7 +34,7 @@ pub struct Environment {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateEnvironmentRequest {
-    pub tenant_id: Uuid,
+    pub tenant_id: String,
     pub name: String,
     pub tags: Option<HashMap<String, String>>,
 }

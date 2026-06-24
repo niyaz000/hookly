@@ -34,7 +34,16 @@ impl ApplicationService {
                 AppError::NotFound(format!("Tenant not found: {}", req.tenant_id))
             })?;
 
-        let application = self.repo.create(req, tenant_id, organization_id, ctx).await?;
+        let environment_id = self
+            .repo
+            .resolve_environment(&req.environment_id)
+            .await?
+            .ok_or_else(|| {
+                warn!(environment_id = %req.environment_id, "environment not found");
+                AppError::NotFound(format!("Environment not found: {}", req.environment_id))
+            })?;
+
+        let application = self.repo.create(req, tenant_id, organization_id, environment_id, ctx).await?;
         info!(public_id = %application.public_id, "application created");
         Ok(application)
     }

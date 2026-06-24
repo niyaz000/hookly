@@ -1,0 +1,2 @@
+ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS payload_type TEXT NOT NULL DEFAULT 'json';

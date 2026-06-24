@@ -5,6 +5,33 @@ use serde::{Deserialize, Serialize};
 use sqlx::types::Json;
 use uuid::Uuid;
 
+// --- Schema validation types ---
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SchemaError {
+    pub field: String,
+    pub message: String,
+}
+
+// --- Payload type ---
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PayloadType {
+    #[default]
+    Json,
+    Text,
+}
+
+impl PayloadType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PayloadType::Json => "json",
+            PayloadType::Text => "text",
+        }
+    }
+}
+
 // --- DB row ---
 
 #[allow(dead_code)]
@@ -22,12 +49,15 @@ pub struct EventRow {
     pub tenant_id: Uuid,
     pub organization_id: Uuid,
     pub payload: Json<serde_json::Value>,
+    pub payload_type: String,
     pub idempotency_key: Option<String>,
     pub body_hash: Option<Vec<u8>>,
     pub tags: Json<HashMap<String, String>>,
     pub request_id: Uuid,
     pub created_by: Uuid,
     pub created_at: DateTime<Utc>,
+    pub schema_valid: bool,
+    pub schema_errors: Json<Vec<SchemaError>>,
 }
 
 // --- Request types ---
@@ -36,8 +66,12 @@ pub struct EventRow {
 pub struct CreateEventRequest {
     pub application_id: String,
     pub event_type_id: String,
+    #[serde(default)]
+    pub schema_version: Option<String>,
     pub endpoint_id: String,
     pub payload: serde_json::Value,
+    #[serde(default)]
+    pub payload_type: PayloadType,
     #[serde(default)]
     pub tags: HashMap<String, String>,
 }
@@ -63,6 +97,54 @@ fn default_limit() -> u32 {
     20
 }
 
+// --- Bulk request types ---
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BulkCreateEventItem {
+    pub application_id: String,
+    pub event_type_id: String,
+    #[serde(default)]
+    pub schema_version: Option<String>,
+    pub endpoint_id: String,
+    pub payload: serde_json::Value,
+    #[serde(default)]
+    pub payload_type: PayloadType,
+    #[serde(default)]
+    pub tags: HashMap<String, String>,
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BulkCreateEventRequest {
+    pub events: Vec<BulkCreateEventItem>,
+}
+
+// --- Bulk response types ---
+
+#[derive(Serialize, Debug)]
+pub struct BulkEventError {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Serialize, Debug)]
+pub struct BulkEventResultItem {
+    pub index: usize,
+    pub status: u16,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event: Option<EventResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<BulkEventError>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct BulkCreateResponse {
+    pub results: Vec<BulkEventResultItem>,
+    pub succeeded: usize,
+    pub failed: usize,
+}
+
 // --- Response types ---
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -73,8 +155,11 @@ pub struct EventResponse {
     pub event_type_name: String,
     pub endpoint_id: Option<String>,
     pub payload: serde_json::Value,
+    pub payload_type: String,
     pub idempotency_key: Option<String>,
     pub tags: HashMap<String, String>,
+    pub schema_valid: bool,
+    pub schema_errors: Vec<SchemaError>,
     pub created_by: Uuid,
     pub created_at: DateTime<Utc>,
 }
@@ -88,8 +173,11 @@ impl From<EventRow> for EventResponse {
             event_type_name: row.event_type_name,
             endpoint_id: row.endpoint_public_id,
             payload: row.payload.0,
+            payload_type: row.payload_type,
             idempotency_key: row.idempotency_key,
             tags: row.tags.0,
+            schema_valid: row.schema_valid,
+            schema_errors: row.schema_errors.0,
             created_by: row.created_by,
             created_at: row.created_at,
         }

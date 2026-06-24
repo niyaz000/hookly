@@ -284,6 +284,23 @@ fn remap_validator_code(e: &validator::ValidationError) -> &'static str {
     }
 }
 
+impl AppError {
+    pub fn to_error_info(&self) -> (u16, &'static str, String) {
+        match self {
+            AppError::NotFound(m) => (404, "not_found", m.clone()),
+            AppError::BadRequest(m) => (400, "bad_request", m.clone()),
+            AppError::Validation(_) => (422, "validation_error", "Request validation failed".into()),
+            AppError::Conflict(m, _) => (409, "conflict", m.clone()),
+            AppError::Unauthorized(m) => (401, "unauthorized", m.clone()),
+            AppError::PayloadTooLarge => (413, "payload_too_large", "Request body exceeds the 256 KB limit".into()),
+            AppError::UriTooLong => (414, "uri_too_long", "Request URI exceeds the 512 character limit".into()),
+            AppError::Database(_) | AppError::Redis(_) | AppError::Internal(_) => {
+                (500, "internal_error", "An internal error occurred".into())
+            }
+        }
+    }
+}
+
 impl From<redis::RedisError> for AppError {
     fn from(err: redis::RedisError) -> Self {
         AppError::Redis(err)

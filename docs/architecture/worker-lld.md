@@ -11,24 +11,24 @@ background tasks. It reads delivery jobs from Redis Streams and delivers them to
 ┌──────────────────────────────────────────────────────────────────────┐
 │                         hookly-worker                                │
 │                                                                      │
-│   ┌────────────┐ ┌────────────┐ ┌────────────┐                      │
-│   │  Worker 0  │ │  Worker 1  │ │  Worker N  │  ← JoinSet           │
+│   ┌────────────┐ ┌────────────┐ ┌────────────┐                       │
+│   │  Worker 0  │ │  Worker 1  │ │  Worker N  │  ← JoinSet            │
 │   │ consumer   │ │ consumer   │ │ consumer   │    WORKER_NUM_WORKERS │
-│   └─────┬──────┘ └─────┬──────┘ └─────┬──────┘    (default 4)      │
+│   └─────┬──────┘ └─────┬──────┘ └─────┬──────┘    (default 4)        │
 │         │              │              │                              │
 │         └──────────────┴──────────────┘                              │
 │                        │                                             │
 │              Shared via Arc / Clone                                  │
-│         PgPool · redis::Client · TenantCrypto · reqwest::Client      │
+│         PgPool · redis::Client · TenantCrypto · request::Client      │
 │                                                                      │
-│   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
-│   │  reclaim::run()  │  │  outbox::run()   │  │   trim::run()    │  │
-│   │  every 60s       │  │  every 10s       │  │   every 60s      │  │
-│   │  XAUTOCLAIM idle │  │  missed XADD     │  │   XTRIM MINID    │  │
-│   │  messages        │  │  recovery        │  │   safe cleanup   │  │
-│   └──────────────────┘  └──────────────────┘  └──────────────────┘  │
+│   ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐   │
+│   │  reclaim::run()  │  │  outbox::run()   │  │   trim::run()    │   │
+│   │  every 60s       │  │  every 10s       │  │   every 60s      │   │
+│   │  XAUTOCLAIM idle │  │  missed XADD     │  │   XTRIM MINID    │   │
+│   │  messages        │  │  recovery        │  │   safe cleanup   │   │
+│   └──────────────────┘  └──────────────────┘  └──────────────────┘   │
 │                                                                      │
-│   Shutdown: tokio::watch channel → 15s graceful drain, then abort   │
+│   Shutdown: tokio::watch channel → 15s graceful drain, then abort    │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 

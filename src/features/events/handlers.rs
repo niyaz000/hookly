@@ -15,7 +15,7 @@ use crate::{
     features::{
         delivery::repository::DeliveryRepository,
         events::{
-            models::{CreateEventRequest, EventResponse, ListQueryParams},
+            models::{BulkCreateEventRequest, BulkCreateResponse, CreateEventRequest, EventResponse, ListQueryParams},
             repository::EventRepository,
             service::EventService,
         },
@@ -41,6 +41,20 @@ pub async fn create_event(
     let (ev, created) = svc(state).create(payload, ctx, idempotency_key.as_deref()).await?;
     let status = if created { StatusCode::CREATED } else { StatusCode::OK };
     Ok((status, Json(ev)))
+}
+
+pub async fn create_events_bulk(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
+    ValidatedJson(payload): ValidatedJson<BulkCreateEventRequest>,
+) -> Result<(StatusCode, Json<BulkCreateResponse>), AppError> {
+    if payload.events.is_empty() || payload.events.len() > 10 {
+        return Err(AppError::BadRequest(
+            "Bulk request must contain between 1 and 10 events".into(),
+        ));
+    }
+    let response = svc(state).create_bulk(payload, ctx).await;
+    Ok((StatusCode::MULTI_STATUS, Json(response)))
 }
 
 pub async fn list_events(

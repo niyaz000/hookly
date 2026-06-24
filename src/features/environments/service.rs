@@ -28,10 +28,16 @@ impl EnvironmentService {
         info!("creating environment");
         if let Some(t) = &req.tags { validators::validate_tags(t)?; }
 
+        let tenant_id = self
+            .repo
+            .resolve_tenant(&req.tenant_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("Tenant not found: {}", req.tenant_id)))?;
+
         let tags = serde_json::to_value(req.tags.unwrap_or_default())
             .unwrap_or(serde_json::Value::Object(Default::default()));
 
-        let env = self.repo.create(req.tenant_id, req.name, tags, ctx).await?;
+        let env = self.repo.create(tenant_id, req.name, tags, ctx).await?;
 
         info!(public_id = %env.public_id, "environment created");
         Ok(env)

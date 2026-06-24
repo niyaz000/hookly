@@ -8,10 +8,37 @@ use crate::common::NanoId;
 use crate::error::AppError;
 use crate::features::event_types::models::{EventType, ListQueryParams};
 
-const SELECT_COLS: &str = "
-    id, public_id, organization_id, tenant_id,
-    name, schema_version, description, event_schema,
-    archived, version, created_by, updated_by, created_at, updated_at";
+// Column list for CTE-based writes (INSERT/UPDATE … RETURNING * aliased as `cte`).
+const CTE_JOINED: &str = r#"
+    cte.id, cte.public_id,
+    cte.organization_id, o.public_id AS organization_public_id,
+    cte.tenant_id,       t.public_id AS tenant_public_id,
+    cte.application_id,  a.public_id AS application_public_id,
+    cte.name, cte.schema_version, cte.description, cte.event_schema,
+    cte.archived, cte.version, cte.created_by, cte.updated_by, cte.created_at, cte.updated_at
+"#;
+
+// Column list for direct SELECT queries (table alias `et`).
+const ET_JOINED: &str = r#"
+    et.id, et.public_id,
+    et.organization_id, o.public_id AS organization_public_id,
+    et.tenant_id,       t.public_id AS tenant_public_id,
+    et.application_id,  a.public_id AS application_public_id,
+    et.name, et.schema_version, et.description, et.event_schema,
+    et.archived, et.version, et.created_by, et.updated_by, et.created_at, et.updated_at
+"#;
+
+const JOINS: &str = r#"
+    JOIN tenants t      ON t.id = cte.tenant_id
+    JOIN organizations o ON o.id = cte.organization_id
+    LEFT JOIN applications a ON a.id = cte.application_id
+"#;
+
+const ET_JOINS: &str = r#"
+    JOIN tenants t      ON t.id = et.tenant_id
+    JOIN organizations o ON o.id = et.organization_id
+    LEFT JOIN applications a ON a.id = et.application_id
+"#;
 
 pub struct EventTypeRepository {
     pool: PgPool,
@@ -32,7 +59,6 @@ impl EventTypeRepository {
         .map_err(AppError::from)
     }
 
-    /// Returns (tenant_id, organization_id) in one query.
     pub async fn resolve_tenant_with_org(
         &self,
         public_id: &str,
@@ -46,11 +72,22 @@ impl EventTypeRepository {
         .map_err(AppError::from)
     }
 
+    pub async fn resolve_application(&self, public_id: &str) -> Result<Option<Uuid>, AppError> {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM applications WHERE public_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(public_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(AppError::from)
+    }
+
     pub async fn create(
         &self,
         req: crate::features::event_types::models::CreateEventTypeRequest,
         tenant_id: Uuid,
         organization_id: Uuid,
+        application_id: Uuid,
         ctx: RequestContext,
     ) -> Result<EventType, AppError> {
         let id = Uuid::new_v4();
@@ -60,18 +97,23 @@ impl EventTypeRepository {
         debug!(public_id = %public_id, "inserting event_type");
         let et = sqlx::query_as::<_, EventType>(&format!(
             r#"
-            INSERT INTO event_types (
-                id, organization_id, tenant_id, public_id,
-                name, schema_version, description, event_schema,
-                archived, created_by, updated_by, request_id,
-                version, created_at, updated_at, deleted_at
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9,$9,$10,0,NOW(),NOW(),NULL)
-            RETURNING {SELECT_COLS}
+            WITH cte AS (
+                INSERT INTO event_types (
+                    id, organization_id, tenant_id, application_id, public_id,
+                    name, schema_version, description, event_schema,
+                    archived, created_by, updated_by, request_id,
+                    version, created_at, updated_at, deleted_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,FALSE,$10,$10,$11,0,NOW(),NOW(),NULL)
+                RETURNING *
+            )
+            SELECT {CTE_JOINED}
+            FROM cte {JOINS}
             "#
         ))
         .bind(id)
         .bind(organization_id)
         .bind(tenant_id)
+        .bind(application_id)
         .bind(public_id)
         .bind(req.name)
         .bind(schema_version)
@@ -85,8 +127,6 @@ impl EventTypeRepository {
         Ok(et)
     }
 
-    /// Creates a new version row derived from an existing event type.
-    /// Returns None if the source public_id does not exist or is deleted.
     pub async fn create_version(
         &self,
         source_public_id: &str,
@@ -100,22 +140,26 @@ impl EventTypeRepository {
         let et = sqlx::query_as::<_, EventType>(&format!(
             r#"
             WITH source AS (
-                SELECT tenant_id, organization_id, name
+                SELECT tenant_id, organization_id, application_id, name
                 FROM event_types
                 WHERE public_id = $1 AND deleted_at IS NULL
+            ),
+            cte AS (
+                INSERT INTO event_types (
+                    id, organization_id, tenant_id, application_id, public_id,
+                    name, schema_version, description, event_schema,
+                    archived, created_by, updated_by, request_id,
+                    version, created_at, updated_at, deleted_at
+                )
+                SELECT $2, organization_id, tenant_id, application_id, $3,
+                       name, $4, $5, $6,
+                       FALSE, $7, $7, $8,
+                       0, NOW(), NOW(), NULL
+                FROM source
+                RETURNING *
             )
-            INSERT INTO event_types (
-                id, organization_id, tenant_id, public_id,
-                name, schema_version, description, event_schema,
-                archived, created_by, updated_by, request_id,
-                version, created_at, updated_at, deleted_at
-            )
-            SELECT $2, organization_id, tenant_id, $3,
-                   name, $4, $5, $6,
-                   FALSE, $7, $7, $8,
-                   0, NOW(), NOW(), NULL
-            FROM source
-            RETURNING {SELECT_COLS}
+            SELECT {CTE_JOINED}
+            FROM cte {JOINS}
             "#
         ))
         .bind(source_public_id)
@@ -141,7 +185,11 @@ impl EventTypeRepository {
             id: Uuid,
             public_id: String,
             organization_id: Uuid,
+            organization_public_id: String,
             tenant_id: Uuid,
+            tenant_public_id: String,
+            application_id: Option<Uuid>,
+            application_public_id: Option<String>,
             name: String,
             schema_version: String,
             description: Option<String>,
@@ -158,17 +206,23 @@ impl EventTypeRepository {
         let rows = sqlx::query_as::<_, Row>(
             r#"
             SELECT
-                id, public_id, organization_id, tenant_id,
-                name, schema_version, description, event_schema,
-                archived, version, created_by, updated_by, created_at, updated_at,
+                et.id, et.public_id,
+                et.organization_id, o.public_id AS organization_public_id,
+                et.tenant_id,       t.public_id AS tenant_public_id,
+                et.application_id,  a.public_id AS application_public_id,
+                et.name, et.schema_version, et.description, et.event_schema,
+                et.archived, et.version, et.created_by, et.updated_by, et.created_at, et.updated_at,
                 COUNT(*) OVER() AS total_count
-            FROM event_types
-            WHERE tenant_id = $1
-              AND ($2::text  IS NULL OR name           = $2)
-              AND ($3::text  IS NULL OR schema_version = $3)
-              AND ($4::bool  IS NULL OR archived       = $4)
-              AND deleted_at IS NULL
-            ORDER BY created_at DESC
+            FROM event_types et
+            JOIN tenants t      ON t.id = et.tenant_id
+            JOIN organizations o ON o.id = et.organization_id
+            LEFT JOIN applications a ON a.id = et.application_id
+            WHERE et.tenant_id = $1
+              AND ($2::text  IS NULL OR et.name           = $2)
+              AND ($3::text  IS NULL OR et.schema_version = $3)
+              AND ($4::bool  IS NULL OR et.archived       = $4)
+              AND et.deleted_at IS NULL
+            ORDER BY et.created_at DESC
             LIMIT $5 OFFSET $6
             "#,
         )
@@ -188,7 +242,11 @@ impl EventTypeRepository {
                 id: r.id,
                 public_id: r.public_id,
                 organization_id: r.organization_id,
+                organization_public_id: r.organization_public_id,
                 tenant_id: r.tenant_id,
+                tenant_public_id: r.tenant_public_id,
+                application_id: r.application_id,
+                application_public_id: r.application_public_id,
                 name: r.name,
                 schema_version: r.schema_version,
                 description: r.description,
@@ -209,9 +267,10 @@ impl EventTypeRepository {
         debug!(public_id = %public_id, "querying event_type");
         let et = sqlx::query_as::<_, EventType>(&format!(
             r#"
-            SELECT {SELECT_COLS}
-            FROM event_types
-            WHERE public_id = $1 AND deleted_at IS NULL
+            SELECT {ET_JOINED}
+            FROM event_types et
+            {ET_JOINS}
+            WHERE et.public_id = $1 AND et.deleted_at IS NULL
             "#
         ))
         .bind(public_id)
@@ -221,22 +280,20 @@ impl EventTypeRepository {
         Ok(et)
     }
 
-    /// Returns all versions (same name + tenant) ordered by schema_version ASC.
     pub async fn get_versions(&self, public_id: &str) -> Result<Vec<EventType>, AppError> {
         debug!(public_id = %public_id, "querying event_type versions");
-        let items = sqlx::query_as::<_, EventType>(
+        let items = sqlx::query_as::<_, EventType>(&format!(
             r#"
-            SELECT id, public_id, organization_id, tenant_id,
-                   name, schema_version, description, event_schema,
-                   archived, version, created_by, updated_by, created_at, updated_at
-            FROM event_types
-            WHERE (name, tenant_id) = (
+            SELECT {ET_JOINED}
+            FROM event_types et
+            {ET_JOINS}
+            WHERE (et.name, et.tenant_id) = (
                 SELECT name, tenant_id FROM event_types WHERE public_id = $1
             )
-            AND deleted_at IS NULL
-            ORDER BY schema_version ASC
-            "#,
-        )
+            AND et.deleted_at IS NULL
+            ORDER BY et.schema_version ASC
+            "#
+        ))
         .bind(public_id)
         .fetch_all(&self.pool)
         .await?;
@@ -244,8 +301,6 @@ impl EventTypeRepository {
         Ok(items)
     }
 
-    /// Updates only the description. Uses optimistic locking via `version`.
-    /// Returns None when the row doesn't match (not found OR stale version).
     pub async fn update_description(
         &self,
         public_id: &str,
@@ -256,16 +311,20 @@ impl EventTypeRepository {
         debug!(public_id = %public_id, "updating event_type description");
         let et = sqlx::query_as::<_, EventType>(&format!(
             r#"
-            UPDATE event_types
-            SET description = $2,
-                version     = version + 1,
-                updated_by  = $3,
-                request_id  = $4,
-                updated_at  = NOW()
-            WHERE public_id = $1
-              AND version   = $5
-              AND deleted_at IS NULL
-            RETURNING {SELECT_COLS}
+            WITH cte AS (
+                UPDATE event_types
+                SET description = $2,
+                    version     = version + 1,
+                    updated_by  = $3,
+                    request_id  = $4,
+                    updated_at  = NOW()
+                WHERE public_id = $1
+                  AND version   = $5
+                  AND deleted_at IS NULL
+                RETURNING *
+            )
+            SELECT {CTE_JOINED}
+            FROM cte {JOINS}
             "#
         ))
         .bind(public_id)
@@ -309,14 +368,18 @@ impl EventTypeRepository {
         debug!(public_id = %public_id, archived = %archived, "setting event_type archived");
         let et = sqlx::query_as::<_, EventType>(&format!(
             r#"
-            UPDATE event_types
-            SET archived   = $2,
-                version    = version + 1,
-                updated_by = $3,
-                request_id = $4,
-                updated_at = NOW()
-            WHERE public_id = $1 AND deleted_at IS NULL
-            RETURNING {SELECT_COLS}
+            WITH cte AS (
+                UPDATE event_types
+                SET archived   = $2,
+                    version    = version + 1,
+                    updated_by = $3,
+                    request_id = $4,
+                    updated_at = NOW()
+                WHERE public_id = $1 AND deleted_at IS NULL
+                RETURNING *
+            )
+            SELECT {CTE_JOINED}
+            FROM cte {JOINS}
             "#
         ))
         .bind(public_id)

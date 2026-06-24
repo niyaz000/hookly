@@ -46,7 +46,16 @@ impl EventTypeService {
                 AppError::NotFound(format!("Tenant not found: {}", req.tenant_id))
             })?;
 
-        let et = self.repo.create(req, tenant_id, organization_id, ctx).await?;
+        let application_id = self
+            .repo
+            .resolve_application(&req.application_id)
+            .await?
+            .ok_or_else(|| {
+                warn!(application_id = %req.application_id, "application not found");
+                AppError::NotFound(format!("Application not found: {}", req.application_id))
+            })?;
+
+        let et = self.repo.create(req, tenant_id, organization_id, application_id, ctx).await?;
         info!(public_id = %et.public_id, "event_type created");
         Ok(EventTypeResponse::from(et))
     }

@@ -22,12 +22,15 @@ const BASE_SELECT: &str = r#"
         ev.tenant_id,
         ev.organization_id,
         ev.payload,
+        ev.payload_type,
         ev.idempotency_key,
         ev.body_hash,
         ev.tags,
         ev.request_id,
         ev.created_by,
-        ev.created_at
+        ev.created_at,
+        ev.schema_valid,
+        ev.schema_errors
     FROM events ev
     JOIN  applications a  ON a.id  = ev.application_id
     JOIN  event_types  et ON et.id = ev.event_type_id
@@ -44,6 +47,8 @@ pub struct ApplicationRef {
 #[derive(sqlx::FromRow, Debug)]
 pub struct EventTypeRef {
     pub id: Uuid,
+    pub event_schema: sqlx::types::Json<crate::features::event_types::models::PropertyDef>,
+    pub schema_version: String,
 }
 
 #[derive(sqlx::FromRow, Debug)]
@@ -75,19 +80,30 @@ impl EventRepository {
     }
 
     /// Resolves an event type by public_id, scoped to the tenant.
-    /// Returns None if the type doesn't exist, is archived, or belongs to a different tenant.
+    ///
+    /// If `schema_version` is `Some`, finds that specific version within the same name-family
+    /// as `public_id`. If `None`, returns the latest version (highest `schema_version`) in
+    /// that family. Returns `None` if the referenced type doesn't exist or is archived.
     pub async fn get_event_type(
         &self,
         public_id: &str,
         tenant_id: Uuid,
+        schema_version: Option<&str>,
     ) -> Result<Option<EventTypeRef>, AppError> {
         sqlx::query_as::<_, EventTypeRef>(
-            "SELECT id FROM event_types \
-             WHERE public_id = $1 AND tenant_id = $2 \
-               AND archived = FALSE AND deleted_at IS NULL",
+            "SELECT id, event_schema, schema_version \
+             FROM event_types \
+             WHERE name = (SELECT name FROM event_types WHERE public_id = $1 AND deleted_at IS NULL) \
+               AND tenant_id = $2 \
+               AND ($3::text IS NULL OR schema_version = $3) \
+               AND archived = FALSE \
+               AND deleted_at IS NULL \
+             ORDER BY schema_version DESC \
+             LIMIT 1",
         )
         .bind(public_id)
         .bind(tenant_id)
+        .bind(schema_version)
         .fetch_optional(&self.db)
         .await
         .map_err(AppError::from)
@@ -118,9 +134,12 @@ impl EventRepository {
         event_type_id: Uuid,
         endpoint_id: Option<Uuid>,
         payload: &serde_json::Value,
+        payload_type: &str,
         tags: &HashMap<String, String>,
         idempotency_key: Option<&str>,
         body_hash: Option<&[u8]>,
+        schema_valid: bool,
+        schema_errors: &[crate::features::events::models::SchemaError],
         ctx: RequestContext,
     ) -> Result<EventRow, AppError> {
         let public_id = format!("evn_{}", NanoId::new());
@@ -129,8 +148,9 @@ impl EventRepository {
             r#"INSERT INTO events
                (public_id, application_id, event_type_id, endpoint_id,
                 tenant_id, organization_id,
-                payload, idempotency_key, body_hash, tags, request_id, created_by)
-               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10::jsonb, $11, $12)
+                payload, payload_type, idempotency_key, body_hash, tags, request_id, created_by,
+                schema_valid, schema_errors)
+               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11::jsonb, $12, $13, $14, $15::jsonb)
                RETURNING id"#,
         )
         .bind(&public_id)
@@ -140,11 +160,14 @@ impl EventRepository {
         .bind(app.tenant_id)
         .bind(app.organization_id)
         .bind(Json(payload))
+        .bind(payload_type)
         .bind(idempotency_key)
         .bind(body_hash)
         .bind(Json(tags))
         .bind(ctx.request_id)
         .bind(ctx.created_by)
+        .bind(schema_valid)
+        .bind(Json(schema_errors))
         .fetch_one(&self.db)
         .await?;
 
@@ -196,12 +219,15 @@ impl EventRepository {
             tenant_id: Uuid,
             organization_id: Uuid,
             payload: Json<serde_json::Value>,
+            payload_type: String,
             idempotency_key: Option<String>,
             body_hash: Option<Vec<u8>>,
             tags: Json<HashMap<String, String>>,
             request_id: Uuid,
             created_by: Uuid,
             created_at: DateTime<Utc>,
+            schema_valid: bool,
+            schema_errors: Json<Vec<crate::features::events::models::SchemaError>>,
             total_count: i64,
         }
 
@@ -217,6 +243,8 @@ impl EventRepository {
                 ev.tenant_id, ev.organization_id,
                 ev.payload, ev.idempotency_key, ev.body_hash, ev.tags,
                 ev.request_id, ev.created_by, ev.created_at,
+                ev.schema_valid, ev.schema_errors,
+                ev.payload_type,
                 COUNT(*) OVER() AS total_count
                FROM events ev
                JOIN  applications a  ON a.id  = ev.application_id
@@ -264,6 +292,9 @@ impl EventRepository {
                 request_id: r.request_id,
                 created_by: r.created_by,
                 created_at: r.created_at,
+                schema_valid: r.schema_valid,
+                schema_errors: r.schema_errors,
+                payload_type: r.payload_type,
             })
             .collect();
 

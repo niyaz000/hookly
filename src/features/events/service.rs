@@ -16,10 +16,18 @@ fn events_counter() -> &'static Counter<u64> {
     })
 }
 
-use crate::common::{idempotency, types::{PaginatedResponse, RequestContext}, validators};
+use crate::common::{
+    idempotency,
+    types::{PaginatedResponse, RequestContext},
+    validators,
+};
 use crate::error::AppError;
 use crate::features::delivery::repository::DeliveryRepository;
-use crate::features::events::models::{CreateEventRequest, EventResponse, ListQueryParams};
+use crate::features::event_types::models::PropertyDef;
+use crate::features::events::models::{
+    BulkCreateEventRequest, BulkCreateResponse, BulkEventError, BulkEventResultItem,
+    CreateEventRequest, EventResponse, ListQueryParams, PayloadType, SchemaError,
+};
 use crate::features::events::repository::EventRepository;
 use crate::queue;
 
@@ -38,15 +46,63 @@ impl EventService {
         }
     }
 
-    fn validate_payload(payload: &serde_json::Value) -> Result<(), AppError> {
-        if !payload.is_object() {
-            return Err(AppError::BadRequest("payload must be a JSON object".into()));
+    fn validate_payload(payload: &serde_json::Value, payload_type: &PayloadType) -> Result<(), AppError> {
+        match payload_type {
+            PayloadType::Json => {
+                if !payload.is_object() {
+                    return Err(AppError::BadRequest(
+                        "payload must be a JSON object when payload_type is 'json'".into(),
+                    ));
+                }
+            }
+            PayloadType::Text => {
+                if !payload.is_string() {
+                    return Err(AppError::BadRequest(
+                        "payload must be a string when payload_type is 'text'".into(),
+                    ));
+                }
+            }
         }
         let size = serde_json::to_string(payload).map(|s| s.len()).unwrap_or(0);
         if size > 512 * 1024 {
             return Err(AppError::BadRequest("payload exceeds 512 KB limit".into()));
         }
         Ok(())
+    }
+
+    fn validate_against_schema(schema: &PropertyDef, payload: &serde_json::Value) -> (bool, Vec<SchemaError>) {
+        let schema_json = schema.to_json_schema();
+        match jsonschema::validator_for(&schema_json) {
+            Ok(validator) => {
+                let errors: Vec<SchemaError> = validator
+                    .iter_errors(payload)
+                    .map(|e| {
+                        let path = e.instance_path.to_string();
+                        let field = if path.is_empty() {
+                            Self::extract_required_field(&e.to_string()).unwrap_or_default()
+                        } else {
+                            path.trim_start_matches('/').replace('/', ".")
+                        };
+                        SchemaError {
+                            field,
+                            message: e.to_string(),
+                        }
+                    })
+                    .collect();
+                (errors.is_empty(), errors)
+            }
+            Err(e) => {
+                warn!("event_schema compiled to invalid JSON Schema: {e}");
+                (true, vec![])
+            }
+        }
+    }
+
+    fn extract_required_field(msg: &str) -> Option<String> {
+        msg.strip_prefix('"')
+            .and_then(|s| s.split_once('"'))
+            .filter(|(_, rest)| rest.trim_start().starts_with("is a required property"))
+            .map(|(field, _)| field.to_owned())
     }
 
     /// Creates a delivery_job row and enqueues a reference into Redis Streams.
@@ -90,7 +146,7 @@ impl EventService {
         ctx: RequestContext,
         idempotency_key: Option<&str>,
     ) -> Result<(EventResponse, bool), AppError> {
-        Self::validate_payload(&req.payload)?;
+        Self::validate_payload(&req.payload, &req.payload_type)?;
         validators::validate_tags(&req.tags)?;
 
         let app = self
@@ -104,7 +160,7 @@ impl EventService {
 
         let et = self
             .repo
-            .get_event_type(&req.event_type_id, app.tenant_id)
+            .get_event_type(&req.event_type_id, app.tenant_id, req.schema_version.as_deref())
             .await?
             .ok_or_else(|| {
                 warn!("event type not found or archived");
@@ -113,6 +169,11 @@ impl EventService {
                     req.event_type_id
                 ))
             })?;
+
+        let (schema_valid, schema_errors) = match &req.payload_type {
+            PayloadType::Text => (true, vec![]),
+            PayloadType::Json => Self::validate_against_schema(&et.event_schema.0, &req.payload),
+        };
 
         let ep = self
             .repo
@@ -126,6 +187,8 @@ impl EventService {
                 ))
             })?;
 
+        let payload_type_str = req.payload_type.as_str();
+
         if let Some(key) = idempotency_key {
             let hash = idempotency::body_hash_bytes(&req);
             let lock_token = idempotency::acquire_lock(&self.redis, "events", key).await?;
@@ -138,8 +201,7 @@ impl EventService {
                             Ok((EventResponse::from(row), false))
                         } else {
                             Err(AppError::Conflict(
-                                "Idempotency key already used with a different request body"
-                                    .into(),
+                                "Idempotency key already used with a different request body".into(),
                                 vec![],
                             ))
                         }
@@ -148,16 +210,32 @@ impl EventService {
                         info!("creating event");
                         match self
                             .repo
-                            .create(app, et.id, Some(ep.id), &req.payload, &req.tags, Some(key), Some(&hash), ctx)
+                            .create(
+                                app,
+                                et.id,
+                                Some(ep.id),
+                                &req.payload,
+                                payload_type_str,
+                                &req.tags,
+                                Some(key),
+                                Some(&hash),
+                                schema_valid,
+                                &schema_errors,
+                                ctx,
+                            )
                             .await
                         {
                             Ok(row) => {
                                 info!(public_id = %row.public_id, "event created");
-                                self.enqueue_delivery(row.id, ep.id, row.organization_id).await;
-                                events_counter().add(1, &[
-                                    KeyValue::new("tenant_id", row.tenant_id.to_string()),
-                                    KeyValue::new("application_id", req.application_id.clone()),
-                                ]);
+                                self.enqueue_delivery(row.id, ep.id, row.organization_id)
+                                    .await;
+                                events_counter().add(
+                                    1,
+                                    &[
+                                        KeyValue::new("tenant_id", row.tenant_id.to_string()),
+                                        KeyValue::new("application_id", req.application_id.clone()),
+                                    ],
+                                );
                                 Ok((EventResponse::from(row), true))
                             }
                             Err(e) => Err(e),
@@ -173,15 +251,88 @@ impl EventService {
         info!("creating event");
         let row = self
             .repo
-            .create(app, et.id, Some(ep.id), &req.payload, &req.tags, None, None, ctx)
+            .create(
+                app,
+                et.id,
+                Some(ep.id),
+                &req.payload,
+                payload_type_str,
+                &req.tags,
+                None,
+                None,
+                schema_valid,
+                &schema_errors,
+                ctx,
+            )
             .await?;
         info!(public_id = %row.public_id, "event created");
-        self.enqueue_delivery(row.id, ep.id, row.organization_id).await;
-        events_counter().add(1, &[
-            KeyValue::new("tenant_id", row.tenant_id.to_string()),
-            KeyValue::new("application_id", req.application_id.clone()),
-        ]);
+        self.enqueue_delivery(row.id, ep.id, row.organization_id)
+            .await;
+        events_counter().add(
+            1,
+            &[
+                KeyValue::new("tenant_id", row.tenant_id.to_string()),
+                KeyValue::new("application_id", req.application_id.clone()),
+            ],
+        );
         Ok((EventResponse::from(row), true))
+    }
+
+    /// Processes up to 10 events independently. Returns per-item results with HTTP 207.
+    #[tracing::instrument(skip(self, req, ctx))]
+    pub async fn create_bulk(
+        &self,
+        req: BulkCreateEventRequest,
+        ctx: RequestContext,
+    ) -> BulkCreateResponse {
+        let mut results = Vec::with_capacity(req.events.len());
+        let mut succeeded = 0usize;
+        let mut failed = 0usize;
+
+        for (index, item) in req.events.into_iter().enumerate() {
+            let idempotency_key = item.idempotency_key.clone();
+            let event_req = CreateEventRequest {
+                application_id: item.application_id,
+                event_type_id: item.event_type_id,
+                schema_version: item.schema_version,
+                endpoint_id: item.endpoint_id,
+                payload: item.payload,
+                payload_type: item.payload_type,
+                tags: item.tags,
+            };
+
+            match self.create(event_req, ctx, idempotency_key.as_deref()).await {
+                Ok((ev, created)) => {
+                    let status = if created { 201 } else { 200 };
+                    results.push(BulkEventResultItem {
+                        index,
+                        status,
+                        event: Some(ev),
+                        error: None,
+                    });
+                    succeeded += 1;
+                }
+                Err(e) => {
+                    let (status, code, message) = e.to_error_info();
+                    results.push(BulkEventResultItem {
+                        index,
+                        status,
+                        event: None,
+                        error: Some(BulkEventError {
+                            code: code.to_owned(),
+                            message,
+                        }),
+                    });
+                    failed += 1;
+                }
+            }
+        }
+
+        BulkCreateResponse {
+            results,
+            succeeded,
+            failed,
+        }
     }
 
     #[tracing::instrument(skip(self))]
