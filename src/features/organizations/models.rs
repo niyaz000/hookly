@@ -25,7 +25,7 @@ pub struct Organization {
     pub name: String,
     pub slug: String,
     pub status: OrganizationStatus,
-    pub billing_email: Option<String>,
+    pub owner_email: Option<String>,
     pub plan: String,
     pub stripe_customer_id: Option<String>,
     pub external_id: Option<String>,
@@ -43,29 +43,22 @@ pub struct Organization {
 #[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct CreateOrganizationRequest {
     #[validate(custom(function = "validate_not_blank", message = "name is required"))]
-    #[validate(length(max = 255, message = "name must be 255 characters or fewer"))]
+    #[validate(length(min = 5, max = 255, message = "name must be 255 characters or fewer"))]
     pub name: String,
     #[validate(custom(function = "validate_not_blank", message = "slug is required"))]
-    #[validate(length(max = 64, message = "slug must be 64 characters or fewer"))]
+    #[validate(length(min = 3, max = 64, message = "slug must be 64 characters or fewer"))]
     #[validate(custom(
         function = "validate_slug",
         message = "slug must be lowercase alphanumeric and hyphens, not starting or ending with a hyphen"
     ))]
     pub slug: String,
-    #[validate(custom(function = "validate_not_blank", message = "billing_email is required"))]
-    #[validate(email(message = "billing_email is not a valid email address"))]
-    #[validate(length(max = 64, message = "billing_email must be 64 characters or fewer"))]
-    pub billing_email: String,
-    #[validate(length(
-        max = 32,
-        message = "stripe_customer_id must be 32 characters or fewer"
-    ))]
-    pub stripe_customer_id: Option<String>,
+    #[validate(custom(function = "validate_not_blank", message = "owner_email is required"))]
+    #[validate(email(message = "owner_email is not a valid email address"))]
+    #[validate(length(max = 64, message = "owner_email must be 64 characters or fewer"))]
+    pub owner_email: String,
     #[validate(length(max = 64, message = "external_id must be 64 characters or fewer"))]
     pub external_id: Option<String>,
     pub tags: Option<HashMap<String, String>>,
-    pub metadata: Option<HashMap<String, String>>,
-    pub settings: Option<HashMap<String, String>>,
 }
 
 impl CreateOrganizationRequest {
@@ -86,19 +79,12 @@ pub struct UpdateOrganizationRequest {
         message = "slug must be lowercase alphanumeric and hyphens, not starting or ending with a hyphen"
     ))]
     pub slug: Option<String>,
-    #[validate(email(message = "billing_email is not a valid email address"))]
-    #[validate(length(max = 64, message = "billing_email must be 64 characters or fewer"))]
-    pub billing_email: Option<String>,
-    #[validate(length(
-        max = 32,
-        message = "stripe_customer_id must be 32 characters or fewer"
-    ))]
-    pub stripe_customer_id: Option<String>,
+    #[validate(email(message = "owner_email is not a valid email address"))]
+    #[validate(length(max = 64, message = "owner_email must be 64 characters or fewer"))]
+    pub owner_email: Option<String>,
     #[validate(length(max = 64, message = "external_id must be 64 characters or fewer"))]
     pub external_id: Option<String>,
     pub tags: Option<HashMap<String, String>>,
-    pub metadata: Option<HashMap<String, String>>,
-    pub settings: Option<HashMap<String, String>>,
 }
 
 impl UpdateOrganizationRequest {
@@ -113,9 +99,7 @@ pub struct OrganizationResponse {
     pub name: String,
     pub slug: String,
     pub status: OrganizationStatus,
-    pub billing_email: Option<String>,
-    pub plan: String,
-    pub stripe_customer_id: Option<String>,
+    pub owner_email: Option<String>,
     pub external_id: Option<String>,
     pub tags: HashMap<String, String>,
     pub created_by: Uuid,
@@ -131,9 +115,7 @@ impl From<Organization> for OrganizationResponse {
             name: org.name,
             slug: org.slug,
             status: org.status,
-            billing_email: org.billing_email,
-            plan: org.plan,
-            stripe_customer_id: org.stripe_customer_id,
+            owner_email: org.owner_email,
             external_id: org.external_id,
             tags: org.tags.0,
             created_by: org.created_by,

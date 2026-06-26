@@ -34,16 +34,16 @@ impl OrganizationRepository {
             r#"
             INSERT INTO organizations (
                 id, public_id, name, slug,
-                billing_email, stripe_customer_id, external_id,
-                tags, metadata, settings,
+                owner_email, external_id,
+                tags,
                 created_by, updated_by, request_id, version,
                 created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4,
-                $5, $6, $7,
-                $8, $9, $10,
-                $11, $11, $12, $13,
-                $14, $14
+                $5, $6,
+                $7,
+                $8, $8, $9, $10,
+                $11, $11
             )
             RETURNING *
             "#,
@@ -52,12 +52,9 @@ impl OrganizationRepository {
         .bind(&public_id)
         .bind(&req.name.trim())
         .bind(&&req.slug.to_lowercase().trim())
-        .bind(&req.billing_email)
-        .bind(req.stripe_customer_id.as_deref())
+        .bind(&req.owner_email)
         .bind(req.external_id.as_deref())
         .bind(Json(req.tags.unwrap_or_default()))
-        .bind(Json(req.metadata.unwrap_or_default()))
-        .bind(Json(req.settings.unwrap_or_default()))
         .bind(ctx.created_by)
         .bind(ctx.request_id)
         .bind(0i32)
@@ -94,30 +91,24 @@ impl OrganizationRepository {
         let org = sqlx::query_as::<_, Organization>(
             r#"
             UPDATE organizations SET
-                name               = COALESCE($1, name),
-                slug               = COALESCE($2, slug),
-                billing_email      = COALESCE($3, billing_email),
-                stripe_customer_id = COALESCE($4, stripe_customer_id),
-                external_id        = COALESCE($5, external_id),
-                tags               = COALESCE($6, tags),
-                metadata           = COALESCE($7, metadata),
-                settings           = COALESCE($8, settings),
-                updated_by         = $9,
-                request_id         = $10,
-                version            = version + 1,
-                updated_at         = NOW()
-            WHERE public_id = $11 AND deleted_at IS NULL
+                name        = COALESCE($1, name),
+                slug        = COALESCE($2, slug),
+                owner_email = COALESCE($3, owner_email),
+                external_id = COALESCE($4, external_id),
+                tags        = COALESCE($5, tags),
+                updated_by  = $6,
+                request_id  = $7,
+                version     = version + 1,
+                updated_at  = NOW()
+            WHERE public_id = $8 AND deleted_at IS NULL
             RETURNING *
             "#,
         )
         .bind(req.name)
         .bind(req.slug)
-        .bind(req.billing_email)
-        .bind(req.stripe_customer_id)
+        .bind(req.owner_email)
         .bind(req.external_id)
         .bind(req.tags.map(Json))
-        .bind(req.metadata.map(Json))
-        .bind(req.settings.map(Json))
         .bind(ctx.created_by)
         .bind(ctx.request_id)
         .bind(public_id)
