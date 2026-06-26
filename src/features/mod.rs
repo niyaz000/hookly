@@ -15,6 +15,7 @@ pub mod platform_subscriptions;
 pub mod platform_webhooks;
 pub mod roles;
 pub mod schedules;
+pub mod subscriptions;
 pub mod teams;
 pub mod tenants;
 pub mod users;

@@ -68,7 +68,6 @@ pub struct CreateEventRequest {
     pub event_type_id: String,
     #[serde(default)]
     pub schema_version: Option<String>,
-    pub endpoint_id: String,
     pub payload: serde_json::Value,
     #[serde(default)]
     pub payload_type: PayloadType,
@@ -84,7 +83,6 @@ pub struct ListQueryParams {
     #[serde(default = "default_limit")]
     pub limit: u32,
     pub event_type_id: Option<String>,
-    pub endpoint_id: Option<String>,
     pub before: Option<DateTime<Utc>>,
     pub after: Option<DateTime<Utc>>,
     pub tags: Option<HashMap<String, String>>,
@@ -105,7 +103,6 @@ pub struct BulkCreateEventItem {
     pub event_type_id: String,
     #[serde(default)]
     pub schema_version: Option<String>,
-    pub endpoint_id: String,
     pub payload: serde_json::Value,
     #[serde(default)]
     pub payload_type: PayloadType,

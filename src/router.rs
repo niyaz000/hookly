@@ -15,7 +15,7 @@ use crate::error::{AppError, REQUEST_ID, REQUEST_PATH};
 use crate::features::{
     api_keys, applications, assignments, delivery, endpoints, environments, event_types, events,
     invites, jwt_keys, organizations, permissions, platform_event_types, platform_subscriptions,
-    platform_webhooks, roles, schedules, teams, tenants, users,
+    platform_webhooks, roles, schedules, subscriptions, teams, tenants, users,
 };
 use crate::state::AppState;
 
@@ -62,6 +62,7 @@ fn v1_routes(state: AppState) -> Router {
         .merge(platform_event_types::routes::routes(state.clone()))
         .merge(platform_webhooks::routes::routes(state.clone()))
         .merge(platform_subscriptions::routes::routes(state.clone()))
+        .merge(subscriptions::routes::routes(state.clone()))
         ;
 
     Router::new()

@@ -15,10 +15,14 @@ use crate::{
     features::{
         delivery::repository::DeliveryRepository,
         events::{
-            models::{BulkCreateEventRequest, BulkCreateResponse, CreateEventRequest, EventResponse, ListQueryParams},
+            models::{
+                BulkCreateEventRequest, BulkCreateResponse, CreateEventRequest, EventResponse,
+                ListQueryParams,
+            },
             repository::EventRepository,
             service::EventService,
         },
+        subscriptions::repository::SubscriptionRepository,
     },
     state::AppState,
 };
@@ -26,7 +30,8 @@ use crate::{
 fn svc(state: AppState) -> EventService {
     EventService::new(
         EventRepository::new(state.db.clone()),
-        DeliveryRepository::new(state.db),
+        DeliveryRepository::new(state.db.clone()),
+        SubscriptionRepository::new(state.db.clone()),
         state.redis,
     )
 }
@@ -38,8 +43,14 @@ pub async fn create_event(
     ValidatedJson(payload): ValidatedJson<CreateEventRequest>,
 ) -> Result<(StatusCode, Json<EventResponse>), AppError> {
     let idempotency_key = idempotency::extract_key(&headers)?;
-    let (ev, created) = svc(state).create(payload, ctx, idempotency_key.as_deref()).await?;
-    let status = if created { StatusCode::CREATED } else { StatusCode::OK };
+    let (ev, created) = svc(state)
+        .create(payload, ctx, idempotency_key.as_deref())
+        .await?;
+    let status = if created {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
     Ok((status, Json(ev)))
 }
 

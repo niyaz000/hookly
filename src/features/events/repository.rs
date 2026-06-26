@@ -51,11 +51,6 @@ pub struct EventTypeRef {
     pub schema_version: String,
 }
 
-#[derive(sqlx::FromRow, Debug)]
-pub struct EndpointRef {
-    pub id: Uuid,
-}
-
 pub struct EventRepository {
     db: PgPool,
 }
@@ -109,30 +104,11 @@ impl EventRepository {
         .map_err(AppError::from)
     }
 
-    /// Resolves an endpoint by public_id, confirming it belongs to the application and is active.
-    pub async fn get_endpoint_for_event(
-        &self,
-        public_id: &str,
-        application_id: Uuid,
-    ) -> Result<Option<EndpointRef>, AppError> {
-        sqlx::query_as::<_, EndpointRef>(
-            "SELECT id FROM endpoints \
-             WHERE public_id = $1 AND application_id = $2 \
-               AND status = 'active' AND deleted_at IS NULL",
-        )
-        .bind(public_id)
-        .bind(application_id)
-        .fetch_optional(&self.db)
-        .await
-        .map_err(AppError::from)
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         &self,
         app: ApplicationRef,
         event_type_id: Uuid,
-        endpoint_id: Option<Uuid>,
         payload: &serde_json::Value,
         payload_type: &str,
         tags: &HashMap<String, String>,
@@ -146,17 +122,16 @@ impl EventRepository {
 
         sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO events
-               (public_id, application_id, event_type_id, endpoint_id,
+               (public_id, application_id, event_type_id,
                 tenant_id, organization_id,
                 payload, payload_type, idempotency_key, body_hash, tags, request_id, created_by,
                 schema_valid, schema_errors)
-               VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11::jsonb, $12, $13, $14, $15::jsonb)
+               VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, $11, $12, $13, $14::jsonb)
                RETURNING id"#,
         )
         .bind(&public_id)
         .bind(app.id)
         .bind(event_type_id)
-        .bind(endpoint_id)
         .bind(app.tenant_id)
         .bind(app.organization_id)
         .bind(Json(payload))
@@ -254,15 +229,13 @@ impl EventRepository {
                    SELECT id FROM applications WHERE public_id = $1 AND deleted_at IS NULL
                )
                  AND ($2::text        IS NULL OR et.public_id = $2)
-                 AND ($3::text        IS NULL OR ep.public_id = $3)
-                 AND ($4::timestamptz IS NULL OR ev.created_at < $4)
-                 AND ($5::timestamptz IS NULL OR ev.created_at > $5)
+                 AND ($3::timestamptz IS NULL OR ev.created_at < $3)
+                 AND ($4::timestamptz IS NULL OR ev.created_at > $4)
                ORDER BY ev.created_at DESC
-               LIMIT $6 OFFSET $7"#,
+               LIMIT $5 OFFSET $6"#,
         )
         .bind(&filter.application_id)
         .bind(&filter.event_type_id)
-        .bind(&filter.endpoint_id)
         .bind(filter.before)
         .bind(filter.after)
         .bind(limit)

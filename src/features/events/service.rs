@@ -29,24 +29,35 @@ use crate::features::events::models::{
     CreateEventRequest, EventResponse, ListQueryParams, PayloadType, SchemaError,
 };
 use crate::features::events::repository::EventRepository;
+use crate::features::subscriptions::repository::SubscriptionRepository;
 use crate::queue;
 
 pub struct EventService {
     repo: EventRepository,
     delivery: DeliveryRepository,
+    subscriptions: SubscriptionRepository,
     redis: redis::Client,
 }
 
 impl EventService {
-    pub fn new(repo: EventRepository, delivery: DeliveryRepository, redis: redis::Client) -> Self {
+    pub fn new(
+        repo: EventRepository,
+        delivery: DeliveryRepository,
+        subscriptions: SubscriptionRepository,
+        redis: redis::Client,
+    ) -> Self {
         Self {
             repo,
             delivery,
+            subscriptions,
             redis,
         }
     }
 
-    fn validate_payload(payload: &serde_json::Value, payload_type: &PayloadType) -> Result<(), AppError> {
+    fn validate_payload(
+        payload: &serde_json::Value,
+        payload_type: &PayloadType,
+    ) -> Result<(), AppError> {
         match payload_type {
             PayloadType::Json => {
                 if !payload.is_object() {
@@ -70,23 +81,26 @@ impl EventService {
         Ok(())
     }
 
-    fn validate_against_schema(schema: &PropertyDef, payload: &serde_json::Value) -> (bool, Vec<SchemaError>) {
+    fn validate_against_schema(
+        schema: &PropertyDef,
+        payload: &serde_json::Value,
+    ) -> (bool, Vec<SchemaError>) {
         let schema_json = schema.to_json_schema();
         match jsonschema::validator_for(&schema_json) {
             Ok(validator) => {
                 let errors: Vec<SchemaError> = validator
                     .iter_errors(payload)
                     .map(|e| {
+                        let raw = e.to_string();
                         let path = e.instance_path.to_string();
-                        let field = if path.is_empty() {
-                            Self::extract_required_field(&e.to_string()).unwrap_or_default()
+                        let (field, message) = if path.is_empty() {
+                            let f = Self::extract_required_field(&raw).unwrap_or_default();
+                            (f, "Missing required property".to_owned())
                         } else {
-                            path.trim_start_matches('/').replace('/', ".")
+                            let f = path.trim_start_matches('/').replace('/', ".");
+                            (f, raw)
                         };
-                        SchemaError {
-                            field,
-                            message: e.to_string(),
-                        }
+                        SchemaError { field, message }
                     })
                     .collect();
                 (errors.is_empty(), errors)
@@ -103,6 +117,30 @@ impl EventService {
             .and_then(|s| s.split_once('"'))
             .filter(|(_, rest)| rest.trim_start().starts_with("is a required property"))
             .map(|(field, _)| field.to_owned())
+    }
+
+    async fn enqueue_for_subscriptions(
+        &self,
+        event_id: Uuid,
+        event_type_id: Uuid,
+        application_id: Uuid,
+        organization_id: Uuid,
+    ) {
+        match self
+            .subscriptions
+            .get_active_for_event_type(event_type_id, application_id)
+            .await
+        {
+            Ok(endpoint_ids) => {
+                for endpoint_id in endpoint_ids {
+                    self.enqueue_delivery(event_id, endpoint_id, organization_id)
+                        .await;
+                }
+            }
+            Err(e) => {
+                warn!(event_id = %event_id, "subscription lookup failed, no delivery scheduled: {e:?}");
+            }
+        }
     }
 
     /// Creates a delivery_job row and enqueues a reference into Redis Streams.
@@ -160,7 +198,11 @@ impl EventService {
 
         let et = self
             .repo
-            .get_event_type(&req.event_type_id, app.tenant_id, req.schema_version.as_deref())
+            .get_event_type(
+                &req.event_type_id,
+                app.tenant_id,
+                req.schema_version.as_deref(),
+            )
             .await?
             .ok_or_else(|| {
                 warn!("event type not found or archived");
@@ -175,26 +217,16 @@ impl EventService {
             PayloadType::Json => Self::validate_against_schema(&et.event_schema.0, &req.payload),
         };
 
-        let ep = self
-            .repo
-            .get_endpoint_for_event(&req.endpoint_id, app.id)
-            .await?
-            .ok_or_else(|| {
-                warn!("endpoint not found or not active");
-                AppError::NotFound(format!(
-                    "Endpoint not found or not active: {}",
-                    req.endpoint_id
-                ))
-            })?;
-
         let payload_type_str = req.payload_type.as_str();
+        let app_id = app.id;
+        let et_id = et.id;
 
         if let Some(key) = idempotency_key {
             let hash = idempotency::body_hash_bytes(&req);
             let lock_token = idempotency::acquire_lock(&self.redis, "events", key).await?;
 
             let result: Result<(EventResponse, bool), AppError> =
-                match self.repo.find_by_idempotency_key(app.id, key).await {
+                match self.repo.find_by_idempotency_key(app_id, key).await {
                     Ok(Some(row)) => {
                         if row.body_hash.as_deref() == Some(hash.as_slice()) {
                             info!(public_id = %row.public_id, "idempotent replay");
@@ -212,8 +244,7 @@ impl EventService {
                             .repo
                             .create(
                                 app,
-                                et.id,
-                                Some(ep.id),
+                                et_id,
                                 &req.payload,
                                 payload_type_str,
                                 &req.tags,
@@ -227,8 +258,13 @@ impl EventService {
                         {
                             Ok(row) => {
                                 info!(public_id = %row.public_id, "event created");
-                                self.enqueue_delivery(row.id, ep.id, row.organization_id)
-                                    .await;
+                                self.enqueue_for_subscriptions(
+                                    row.id,
+                                    et_id,
+                                    app_id,
+                                    row.organization_id,
+                                )
+                                .await;
                                 events_counter().add(
                                     1,
                                     &[
@@ -253,8 +289,7 @@ impl EventService {
             .repo
             .create(
                 app,
-                et.id,
-                Some(ep.id),
+                et_id,
                 &req.payload,
                 payload_type_str,
                 &req.tags,
@@ -266,7 +301,7 @@ impl EventService {
             )
             .await?;
         info!(public_id = %row.public_id, "event created");
-        self.enqueue_delivery(row.id, ep.id, row.organization_id)
+        self.enqueue_for_subscriptions(row.id, et_id, app_id, row.organization_id)
             .await;
         events_counter().add(
             1,
@@ -295,13 +330,15 @@ impl EventService {
                 application_id: item.application_id,
                 event_type_id: item.event_type_id,
                 schema_version: item.schema_version,
-                endpoint_id: item.endpoint_id,
                 payload: item.payload,
                 payload_type: item.payload_type,
                 tags: item.tags,
             };
 
-            match self.create(event_req, ctx, idempotency_key.as_deref()).await {
+            match self
+                .create(event_req, ctx, idempotency_key.as_deref())
+                .await
+            {
                 Ok((ev, created)) => {
                     let status = if created { 201 } else { 200 };
                     results.push(BulkEventResultItem {
