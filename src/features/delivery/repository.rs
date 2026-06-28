@@ -6,6 +6,7 @@ use crate::common::nano_id::NanoId;
 use crate::error::AppError;
 use crate::features::delivery::models::{DeliveryJobRow, UnqueuedJob, WorkerJob};
 
+#[derive(Clone)]
 pub struct DeliveryRepository {
     db: PgPool,
 }
@@ -87,6 +88,7 @@ impl DeliveryRepository {
                 ev.payload,
                 ev.tenant_id,
                 ep.config         AS endpoint_config,
+                ep.rate_limit_per_minute,
                 es.secret         AS encrypted_secret
                FROM delivery_jobs dj
                JOIN events    ev ON ev.id = dj.event_id

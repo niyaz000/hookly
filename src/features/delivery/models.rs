@@ -36,6 +36,7 @@ pub struct WorkerJob {
     pub tenant_id: Uuid,
     pub endpoint_config: Json<serde_json::Value>,
     pub encrypted_secret: String,
+    pub rate_limit_per_minute: Option<i32>,
 }
 
 #[derive(Serialize, Debug)]

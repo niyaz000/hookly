@@ -1,13 +1,17 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use dotenvy::dotenv;
+use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tracing::info;
 
+mod circuitbreaker;
 mod config;
 mod consumer;
 mod deliver;
 mod outbox;
+mod ratelimit;
 mod reclaim;
 mod trim;
 
@@ -69,6 +73,7 @@ async fn main() {
     }
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let sem = Arc::new(Semaphore::new(worker_cfg.max_inflight));
     let mut set = JoinSet::new();
 
     for worker_id in 0..worker_cfg.num_workers {
@@ -79,6 +84,7 @@ async fn main() {
             redis.clone(),
             crypto.clone(),
             http.clone(),
+            Arc::clone(&sem),
             shutdown_rx.clone(),
         ));
     }

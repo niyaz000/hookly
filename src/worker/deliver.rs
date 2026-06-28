@@ -77,6 +77,8 @@ pub struct DeliveryResult {
     pub http_status: Option<i32>,
     pub response_body: Option<String>,
     pub latency_ms: i32,
+    /// Parsed from the Retry-After response header (seconds). Only set on 429.
+    pub retry_after_secs: Option<u64>,
 }
 
 /// Signs the webhook payload using HMAC-SHA256.
@@ -110,6 +112,7 @@ pub async fn deliver(
                 http_status: None,
                 response_body: Some(format!("invalid endpoint config: {e}")),
                 latency_ms: 0,
+                retry_after_secs: None,
             };
         }
     };
@@ -123,6 +126,7 @@ pub async fn deliver(
                 http_status: None,
                 response_body: Some("secret decryption failed".to_string()),
                 latency_ms: 0,
+                retry_after_secs: None,
             };
         }
     };
@@ -136,6 +140,7 @@ pub async fn deliver(
                 http_status: None,
                 response_body: Some(format!("payload serialization failed: {e}")),
                 latency_ms: 0,
+                retry_after_secs: None,
             };
         }
     };
@@ -181,6 +186,16 @@ pub async fn deliver(
     let result = match response {
         Ok(resp) => {
             let http_status = resp.status().as_u16() as i32;
+
+            let retry_after_secs = if http_status == 429 {
+                resp.headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+            } else {
+                None
+            };
+
             let body = resp
                 .text()
                 .await
@@ -200,6 +215,7 @@ pub async fn deliver(
                 http_status: Some(http_status),
                 response_body: body,
                 latency_ms,
+                retry_after_secs,
             }
         }
         Err(e) if e.is_timeout() => DeliveryResult {
@@ -207,12 +223,14 @@ pub async fn deliver(
             http_status: None,
             response_body: Some(e.to_string()),
             latency_ms,
+            retry_after_secs: None,
         },
         Err(e) => DeliveryResult {
             status: DeliveryStatus::Failed,
             http_status: None,
             response_body: Some(e.to_string()),
             latency_ms,
+            retry_after_secs: None,
         },
     };
 

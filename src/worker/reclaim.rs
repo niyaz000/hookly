@@ -58,6 +58,7 @@ pub async fn run(
                     &crypto,
                     &http,
                     &redis,
+                    &config,
                 )
                 .await;
             }
