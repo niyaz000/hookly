@@ -20,7 +20,12 @@ pub struct Environment {
     pub id: Uuid,
     pub public_id: String,
     pub tenant_id: Uuid,
+    #[sqlx(default)]
+    pub tenant_public_id: Option<String>,
+    #[sqlx(default)]
+    pub organization_public_id: Option<String>,
     pub name: String,
+    pub description: Option<String>,
     pub status: EnvironmentStatus,
     pub tags: Json<HashMap<String, String>>,
     pub version: i32,
@@ -28,6 +33,10 @@ pub struct Environment {
     pub updated_by: Uuid,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[sqlx(default)]
+    pub created_by_public_id: Option<String>,
+    #[sqlx(default)]
+    pub updated_by_public_id: Option<String>,
 }
 
 // ── Request types ─────────────────────────────────────────────────────────────
@@ -36,6 +45,7 @@ pub struct Environment {
 pub struct CreateEnvironmentRequest {
     pub tenant_id: String,
     pub name: String,
+    pub description: Option<String>,
     pub tags: Option<HashMap<String, String>>,
 }
 
@@ -98,12 +108,15 @@ pub struct ListEnvironmentsQuery {
 #[derive(Debug, Serialize)]
 pub struct EnvironmentResponse {
     pub id: String,
-    pub tenant_id: Uuid,
+    pub organization_id: String,
+    pub tenant_id: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub status: EnvironmentStatus,
     pub tags: HashMap<String, String>,
-    pub created_by: Uuid,
-    pub updated_by: Uuid,
+    pub created_by: String,
+    pub updated_by: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -112,12 +125,14 @@ impl From<Environment> for EnvironmentResponse {
     fn from(e: Environment) -> Self {
         Self {
             id: e.public_id,
-            tenant_id: e.tenant_id,
+            organization_id: e.organization_public_id.unwrap_or_default(),
+            tenant_id: e.tenant_public_id.unwrap_or_else(|| e.tenant_id.to_string()),
             name: e.name,
+            description: e.description,
             status: e.status,
             tags: e.tags.0,
-            created_by: e.created_by,
-            updated_by: e.updated_by,
+            created_by: e.created_by_public_id.unwrap_or_else(|| e.created_by.to_string()),
+            updated_by: e.updated_by_public_id.unwrap_or_else(|| e.updated_by.to_string()),
             created_at: e.created_at,
             updated_at: e.updated_at,
         }

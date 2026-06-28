@@ -36,6 +36,10 @@ pub struct Tenant {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    #[sqlx(default)]
+    pub created_by_public_id: Option<String>,
+    #[sqlx(default)]
+    pub updated_by_public_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
@@ -77,8 +81,8 @@ pub struct TenantResponse {
     pub description: Option<String>,
     pub status: TenantStatus,
     pub tags: HashMap<String, String>,
-    pub created_by: Uuid,
-    pub updated_by: Uuid,
+    pub created_by: String,
+    pub updated_by: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -92,8 +96,8 @@ impl From<Tenant> for TenantResponse {
             description: t.description,
             status: t.status,
             tags: t.tags.0,
-            created_by: t.created_by,
-            updated_by: t.updated_by,
+            created_by: t.created_by_public_id.unwrap_or_else(|| t.created_by.to_string()),
+            updated_by: t.updated_by_public_id.unwrap_or_else(|| t.updated_by.to_string()),
             created_at: t.created_at,
             updated_at: t.updated_at,
         }

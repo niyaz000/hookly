@@ -24,7 +24,11 @@ pub struct User {
     pub id: Uuid,
     pub public_id: String,
     pub organization_id: Uuid,
+    #[sqlx(default)]
+    pub organization_public_id: Option<String>,
     pub tenant_id: Uuid,
+    #[sqlx(default)]
+    pub tenant_public_id: Option<String>,
     pub email: String,
     pub phone: Option<String>,
     pub status: UserStatus,
@@ -45,6 +49,10 @@ pub struct User {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    #[sqlx(default)]
+    pub created_by_public_id: Option<String>,
+    #[sqlx(default)]
+    pub updated_by_public_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
@@ -92,22 +100,19 @@ pub struct LockUserRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserResponse {
     pub id: String,
-    pub organization_id: Uuid,
-    pub tenant_id: Uuid,
+    pub organization_id: String,
+    pub tenant_id: String,
     pub email: String,
     pub phone: Option<String>,
     pub status: UserStatus,
     pub email_verified_at: Option<DateTime<Utc>>,
     pub phone_verified_at: Option<DateTime<Utc>>,
     pub last_active_at: Option<DateTime<Utc>>,
-    pub metadata: HashMap<String, String>,
     pub tags: HashMap<String, String>,
-    pub settings: HashMap<String, String>,
-    pub created_by: Uuid,
-    pub updated_by: Uuid,
-    pub request_id: Uuid,
     pub locked_until: Option<DateTime<Utc>>,
     pub login_count: i32,
+    pub created_by: String,
+    pub updated_by: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -116,22 +121,21 @@ impl From<User> for UserResponse {
     fn from(u: User) -> Self {
         Self {
             id: u.public_id,
-            organization_id: u.organization_id,
-            tenant_id: u.tenant_id,
+            organization_id: u.organization_public_id
+                .unwrap_or_else(|| u.organization_id.to_string()),
+            tenant_id: u.tenant_public_id
+                .unwrap_or_else(|| u.tenant_id.to_string()),
             email: u.email,
             phone: u.phone,
             status: u.status,
             email_verified_at: u.email_verified_at,
             phone_verified_at: u.phone_verified_at,
             last_active_at: u.last_active_at,
-            metadata: u.metadata.0,
             tags: u.tags.0,
-            settings: u.settings.0,
-            created_by: u.created_by,
-            updated_by: u.updated_by,
-            request_id: u.request_id,
             locked_until: u.locked_until,
             login_count: u.login_count,
+            created_by: u.created_by_public_id.unwrap_or_else(|| u.created_by.to_string()),
+            updated_by: u.updated_by_public_id.unwrap_or_else(|| u.updated_by.to_string()),
             created_at: u.created_at,
             updated_at: u.updated_at,
         }

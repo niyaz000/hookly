@@ -11,7 +11,21 @@ use super::models::{
     UpdateApiKeySettingsRequest, UpsertApiKeySettingsRequest,
 };
 
+// Columns for SELECT queries (with JOIN aliases for public IDs).
 const SELECT_API_KEY_COLS: &str = "
+    ak.id, ak.public_id, ak.organization_id, ak.tenant_id, ak.user_id,
+    o.public_id AS organization_public_id,
+    t.public_id AS tenant_public_id,
+    u.public_id AS user_public_id,
+    ak.name, ak.description, ak.key_hash, ak.key_encrypted, ak.key_prefix,
+    ak.environment_id, ak.status, ak.expires_at, ak.last_used_at,
+    ak.version, ak.created_by, ak.updated_by, ak.created_at, ak.updated_at, ak.deleted_at,
+    creator.public_id AS created_by_public_id,
+    updater.public_id AS updated_by_public_id
+";
+
+// Columns returned by INSERT/UPDATE RETURNING (no JOIN available).
+const RETURNING_API_KEY_COLS: &str = "
     id, public_id, organization_id, tenant_id, user_id,
     name, description, key_hash, key_encrypted, key_prefix,
     environment_id, status, expires_at, last_used_at,
@@ -19,6 +33,14 @@ const SELECT_API_KEY_COLS: &str = "
 ";
 
 const SELECT_SETTINGS_COLS: &str = "
+    s.id, s.public_id, s.organization_id, s.tenant_id,
+    o.public_id AS organization_public_id,
+    t.public_id AS tenant_public_id,
+    s.max_keys_per_user, s.key_length, s.default_ttl_seconds, s.allow_view_later,
+    s.version, s.created_by, s.updated_by, s.created_at, s.updated_at
+";
+
+const RETURNING_SETTINGS_COLS: &str = "
     id, public_id, organization_id, tenant_id,
     max_keys_per_user, key_length, default_ttl_seconds, allow_view_later,
     version, created_by, updated_by, created_at, updated_at
@@ -60,18 +82,27 @@ impl ApiKeyRepository {
 
         let key = sqlx::query_as::<_, ApiKey>(&format!(
             r#"
-            INSERT INTO api_keys (
-                id, public_id, organization_id, tenant_id, user_id,
-                name, description, key_hash, key_encrypted, key_prefix,
-                environment_id, expires_at,
-                request_id, version, created_by, updated_by, created_at, updated_at
-            ) VALUES (
-                $1, $2, $3, $4, $5,
-                $6, $7, $8, $9, $10,
-                $11, $12,
-                $13, 0, $14, $14, NOW(), NOW()
+            WITH ins AS (
+                INSERT INTO api_keys (
+                    id, public_id, organization_id, tenant_id, user_id,
+                    name, description, key_hash, key_encrypted, key_prefix,
+                    environment_id, expires_at,
+                    request_id, version, created_by, updated_by, created_at, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4, $5,
+                    $6, $7, $8, $9, $10,
+                    $11, $12,
+                    $13, 0, $14, $14, NOW(), NOW()
+                )
+                RETURNING {RETURNING_API_KEY_COLS}
             )
-            RETURNING {SELECT_API_KEY_COLS}
+            SELECT {SELECT_API_KEY_COLS}
+            FROM ins ak
+            JOIN organizations o      ON o.id = ak.organization_id
+            JOIN tenants t            ON t.id = ak.tenant_id
+            JOIN identity.users u     ON u.id = ak.user_id
+            LEFT JOIN identity.users creator ON creator.id = ak.created_by
+            LEFT JOIN identity.users updater ON updater.id = ak.updated_by
             "#
         ))
         .bind(id)
@@ -98,7 +129,14 @@ impl ApiKeyRepository {
         debug!(public_id = %public_id, "querying api key by public_id");
 
         let key = sqlx::query_as::<_, ApiKey>(&format!(
-            "SELECT {SELECT_API_KEY_COLS} FROM api_keys WHERE public_id = $1 AND deleted_at IS NULL"
+            r#"SELECT {SELECT_API_KEY_COLS}
+            FROM api_keys ak
+            JOIN organizations o  ON o.id = ak.organization_id
+            JOIN tenants t        ON t.id = ak.tenant_id
+            JOIN identity.users u ON u.id = ak.user_id
+            LEFT JOIN identity.users creator ON creator.id = ak.created_by
+            LEFT JOIN identity.users updater ON updater.id = ak.updated_by
+            WHERE ak.public_id = $1 AND ak.deleted_at IS NULL"#
         ))
         .bind(public_id)
         .fetch_optional(&self.pool)
@@ -111,7 +149,14 @@ impl ApiKeyRepository {
         debug!("querying api key by hash");
 
         let key = sqlx::query_as::<_, ApiKey>(&format!(
-            "SELECT {SELECT_API_KEY_COLS} FROM api_keys WHERE key_hash = $1"
+            r#"SELECT {SELECT_API_KEY_COLS}
+            FROM api_keys ak
+            JOIN organizations o  ON o.id = ak.organization_id
+            JOIN tenants t        ON t.id = ak.tenant_id
+            JOIN identity.users u ON u.id = ak.user_id
+            LEFT JOIN identity.users creator ON creator.id = ak.created_by
+            LEFT JOIN identity.users updater ON updater.id = ak.updated_by
+            WHERE ak.key_hash = $1"#
         ))
         .bind(key_hash)
         .fetch_optional(&self.pool)
@@ -138,28 +183,35 @@ impl ApiKeyRepository {
 
         let cols = SELECT_API_KEY_COLS;
         let mut qb = QueryBuilder::<sqlx::Postgres>::new(format!(
-            "SELECT {cols} FROM api_keys WHERE tenant_id = "
+            r#"SELECT {cols}
+            FROM api_keys ak
+            JOIN organizations o  ON o.id = ak.organization_id
+            JOIN tenants t        ON t.id = ak.tenant_id
+            JOIN identity.users u ON u.id = ak.user_id
+            LEFT JOIN identity.users creator ON creator.id = ak.created_by
+            LEFT JOIN identity.users updater ON updater.id = ak.updated_by
+            WHERE ak.tenant_id = "#
         ));
         qb.push_bind(tenant_id);
-        qb.push(" AND deleted_at IS NULL");
+        qb.push(" AND ak.deleted_at IS NULL");
 
         if let Some(uid) = user_id {
-            qb.push(" AND user_id = ").push_bind(uid);
+            qb.push(" AND ak.user_id = ").push_bind(uid);
         }
         if let Some(env_id) = environment_id {
-            qb.push(" AND environment_id = ").push_bind(env_id);
+            qb.push(" AND ak.environment_id = ").push_bind(env_id);
         }
         if let Some(st) = status {
-            qb.push(" AND status = ").push_bind(st);
+            qb.push(" AND ak.status = ").push_bind(st);
         }
         if let Some(tags_val) = tags {
-            qb.push(" AND tags @> ").push_bind(tags_val);
+            qb.push(" AND ak.tags @> ").push_bind(tags_val);
         }
         if let Some(cursor_id) = cursor {
-            qb.push(" AND id > ").push_bind(cursor_id);
+            qb.push(" AND ak.id > ").push_bind(cursor_id);
         }
 
-        qb.push(" ORDER BY id ASC LIMIT ").push_bind(limit + 1);
+        qb.push(" ORDER BY ak.id ASC LIMIT ").push_bind(limit + 1);
 
         let mut keys: Vec<ApiKey> = qb
             .build_query_as::<ApiKey>()
@@ -186,15 +238,24 @@ impl ApiKeyRepository {
 
         let key = sqlx::query_as::<_, ApiKey>(&format!(
             r#"
-            UPDATE api_keys SET
-                description = COALESCE($1, description),
-                expires_at  = COALESCE($2, expires_at),
-                updated_by  = $3,
-                request_id  = $4,
-                version     = version + 1,
-                updated_at  = NOW()
-            WHERE public_id = $5 AND deleted_at IS NULL
-            RETURNING {SELECT_API_KEY_COLS}
+            WITH upd AS (
+                UPDATE api_keys SET
+                    description = COALESCE($1, description),
+                    expires_at  = COALESCE($2, expires_at),
+                    updated_by  = $3,
+                    request_id  = $4,
+                    version     = version + 1,
+                    updated_at  = NOW()
+                WHERE public_id = $5 AND deleted_at IS NULL
+                RETURNING {RETURNING_API_KEY_COLS}
+            )
+            SELECT {SELECT_API_KEY_COLS}
+            FROM upd ak
+            JOIN organizations o  ON o.id = ak.organization_id
+            JOIN tenants t        ON t.id = ak.tenant_id
+            JOIN identity.users u ON u.id = ak.user_id
+            LEFT JOIN identity.users creator ON creator.id = ak.created_by
+            LEFT JOIN identity.users updater ON updater.id = ak.updated_by
             "#
         ))
         .bind(description)
@@ -266,7 +327,11 @@ impl ApiKeyRepository {
         debug!(tenant_id = %tenant_id, "querying api key settings by tenant");
 
         let settings = sqlx::query_as::<_, ApiKeySettings>(&format!(
-            "SELECT {SELECT_SETTINGS_COLS} FROM api_key_settings WHERE tenant_id = $1"
+            r#"SELECT {SELECT_SETTINGS_COLS}
+            FROM api_key_settings s
+            JOIN organizations o ON o.id = s.organization_id
+            JOIN tenants t       ON t.id = s.tenant_id
+            WHERE s.tenant_id = $1"#
         ))
         .bind(tenant_id)
         .fetch_optional(&self.pool)
@@ -282,7 +347,11 @@ impl ApiKeyRepository {
         debug!(public_id = %public_id, "querying api key settings by public_id");
 
         let settings = sqlx::query_as::<_, ApiKeySettings>(&format!(
-            "SELECT {SELECT_SETTINGS_COLS} FROM api_key_settings WHERE public_id = $1"
+            r#"SELECT {SELECT_SETTINGS_COLS}
+            FROM api_key_settings s
+            JOIN organizations o ON o.id = s.organization_id
+            JOIN tenants t       ON t.id = s.tenant_id
+            WHERE s.public_id = $1"#
         ))
         .bind(public_id)
         .fetch_optional(&self.pool)
@@ -307,25 +376,31 @@ impl ApiKeyRepository {
 
         let settings = sqlx::query_as::<_, ApiKeySettings>(&format!(
             r#"
-            INSERT INTO api_key_settings (
-                id, public_id, organization_id, tenant_id,
-                max_keys_per_user, key_length, default_ttl_seconds, allow_view_later,
-                request_id, version, created_by, updated_by, created_at, updated_at
-            ) VALUES (
-                $1, $2, $3, $4,
-                $5, $6, $7, $8,
-                $9, 0, $10, $10, NOW(), NOW()
+            WITH ups AS (
+                INSERT INTO api_key_settings (
+                    id, public_id, organization_id, tenant_id,
+                    max_keys_per_user, key_length, default_ttl_seconds, allow_view_later,
+                    request_id, version, created_by, updated_by, created_at, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4,
+                    $5, $6, $7, $8,
+                    $9, 0, $10, $10, NOW(), NOW()
+                )
+                ON CONFLICT (organization_id, tenant_id) DO UPDATE SET
+                    max_keys_per_user   = EXCLUDED.max_keys_per_user,
+                    key_length          = EXCLUDED.key_length,
+                    default_ttl_seconds = EXCLUDED.default_ttl_seconds,
+                    allow_view_later    = EXCLUDED.allow_view_later,
+                    request_id          = EXCLUDED.request_id,
+                    version             = api_key_settings.version + 1,
+                    updated_by          = EXCLUDED.updated_by,
+                    updated_at          = NOW()
+                RETURNING {RETURNING_SETTINGS_COLS}
             )
-            ON CONFLICT (organization_id, tenant_id) DO UPDATE SET
-                max_keys_per_user   = EXCLUDED.max_keys_per_user,
-                key_length          = EXCLUDED.key_length,
-                default_ttl_seconds = EXCLUDED.default_ttl_seconds,
-                allow_view_later    = EXCLUDED.allow_view_later,
-                request_id          = EXCLUDED.request_id,
-                version             = api_key_settings.version + 1,
-                updated_by          = EXCLUDED.updated_by,
-                updated_at          = NOW()
-            RETURNING {SELECT_SETTINGS_COLS}
+            SELECT {SELECT_SETTINGS_COLS}
+            FROM ups s
+            JOIN organizations o ON o.id = s.organization_id
+            JOIN tenants t       ON t.id = s.tenant_id
             "#
         ))
         .bind(id)
@@ -354,17 +429,23 @@ impl ApiKeyRepository {
 
         let settings = sqlx::query_as::<_, ApiKeySettings>(&format!(
             r#"
-            UPDATE api_key_settings SET
-                max_keys_per_user   = $1,
-                key_length          = $2,
-                default_ttl_seconds = $3,
-                allow_view_later    = $4,
-                request_id          = $5,
-                version             = version + 1,
-                updated_by          = $6,
-                updated_at          = NOW()
-            WHERE public_id = $7
-            RETURNING {SELECT_SETTINGS_COLS}
+            WITH upd AS (
+                UPDATE api_key_settings SET
+                    max_keys_per_user   = $1,
+                    key_length          = $2,
+                    default_ttl_seconds = $3,
+                    allow_view_later    = $4,
+                    request_id          = $5,
+                    version             = version + 1,
+                    updated_by          = $6,
+                    updated_at          = NOW()
+                WHERE public_id = $7
+                RETURNING {RETURNING_SETTINGS_COLS}
+            )
+            SELECT {SELECT_SETTINGS_COLS}
+            FROM upd s
+            JOIN organizations o ON o.id = s.organization_id
+            JOIN tenants t       ON t.id = s.tenant_id
             "#
         ))
         .bind(req.max_keys_per_user)

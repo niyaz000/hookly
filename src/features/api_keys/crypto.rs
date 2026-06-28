@@ -8,14 +8,18 @@ use sha2::{Digest, Sha256};
 use crate::common::NanoId;
 use crate::error::AppError;
 
-/// Generates a new API key and the 3-char environment prefix stored as `key_prefix`.
+/// Generates a new API key and the display prefix stored as `key_prefix`.
 /// Returns `(full_key, key_prefix)`.
 ///
 /// Format: `key_<first-3-of-env-name>_<random>`
+/// `key_prefix` stores `<env-tag>_<first-3-of-random>` (e.g. "pro_mbd") so that
+/// `key_hint = "key_{key_prefix}***"` lets users match the first visible characters.
 pub fn generate_api_key(env_name: &str, key_length: i16) -> (String, String) {
     let random_part = NanoId::generate(key_length as usize);
-    let key_prefix: String = env_name.chars().take(3).collect();
-    let full_key = format!("key_{}_{}", key_prefix, random_part);
+    let env_tag: String = env_name.chars().take(3).collect();
+    let random_hint: String = random_part.chars().take(3).collect();
+    let full_key = format!("key_{}_{}", env_tag, random_part);
+    let key_prefix = format!("{}_{}", env_tag, random_hint);
     (full_key, key_prefix)
 }
 

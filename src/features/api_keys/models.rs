@@ -25,8 +25,14 @@ pub struct ApiKey {
     pub id: Uuid,
     pub public_id: String,
     pub organization_id: Uuid,
+    #[sqlx(default)]
+    pub organization_public_id: Option<String>,
     pub tenant_id: Uuid,
+    #[sqlx(default)]
+    pub tenant_public_id: Option<String>,
     pub user_id: Uuid,
+    #[sqlx(default)]
+    pub user_public_id: Option<String>,
     pub name: String,
     pub description: Option<String>,
     pub key_hash: String,
@@ -42,6 +48,10 @@ pub struct ApiKey {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    #[sqlx(default)]
+    pub created_by_public_id: Option<String>,
+    #[sqlx(default)]
+    pub updated_by_public_id: Option<String>,
 }
 
 #[derive(sqlx::FromRow, Debug, Clone)]
@@ -49,7 +59,11 @@ pub struct ApiKeySettings {
     pub id: Uuid,
     pub public_id: String,
     pub organization_id: Uuid,
+    #[sqlx(default)]
+    pub organization_public_id: Option<String>,
     pub tenant_id: Uuid,
+    #[sqlx(default)]
+    pub tenant_public_id: Option<String>,
     pub max_keys_per_user: Option<i32>,
     pub key_length: i16,
     pub default_ttl_seconds: Option<i32>,
@@ -256,9 +270,9 @@ pub struct InsertAuditParams {
 #[derive(Debug, Serialize)]
 pub struct ApiKeyResponse {
     pub id: String,
-    pub organization_id: Uuid,
-    pub tenant_id: Uuid,
-    pub user_id: Uuid,
+    pub organization_id: String,
+    pub tenant_id: String,
+    pub user_id: String,
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -271,20 +285,23 @@ pub struct ApiKeyResponse {
     pub key: Option<String>,
     pub expires_at: Option<DateTime<Utc>>,
     pub last_used_at: Option<DateTime<Utc>>,
-    pub created_by: Uuid,
-    pub updated_by: Uuid,
+    pub created_by: String,
+    pub updated_by: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 impl From<ApiKey> for ApiKeyResponse {
     fn from(k: ApiKey) -> Self {
-        let key_hint = format!("key_{}_***", k.key_prefix);
+        let key_hint = format!("key_{}***", k.key_prefix);
         Self {
             id: k.public_id,
-            organization_id: k.organization_id,
-            tenant_id: k.tenant_id,
-            user_id: k.user_id,
+            organization_id: k.organization_public_id
+                .unwrap_or_else(|| k.organization_id.to_string()),
+            tenant_id: k.tenant_public_id
+                .unwrap_or_else(|| k.tenant_id.to_string()),
+            user_id: k.user_public_id
+                .unwrap_or_else(|| k.user_id.to_string()),
             name: k.name,
             description: k.description,
             environment_id: k.environment_id,
@@ -293,8 +310,8 @@ impl From<ApiKey> for ApiKeyResponse {
             key: None,
             expires_at: k.expires_at,
             last_used_at: k.last_used_at,
-            created_by: k.created_by,
-            updated_by: k.updated_by,
+            created_by: k.created_by_public_id.unwrap_or_else(|| k.created_by.to_string()),
+            updated_by: k.updated_by_public_id.unwrap_or_else(|| k.updated_by.to_string()),
             created_at: k.created_at,
             updated_at: k.updated_at,
         }
@@ -317,8 +334,8 @@ pub struct RevealApiKeyResponse {
 #[derive(Debug, Serialize)]
 pub struct ApiKeySettingsResponse {
     pub id: String,
-    pub organization_id: Uuid,
-    pub tenant_id: Uuid,
+    pub organization_id: String,
+    pub tenant_id: String,
     pub max_keys_per_user: Option<i32>,
     pub key_length: i16,
     pub default_ttl_seconds: Option<i32>,
@@ -333,8 +350,10 @@ impl From<ApiKeySettings> for ApiKeySettingsResponse {
     fn from(s: ApiKeySettings) -> Self {
         Self {
             id: s.public_id,
-            organization_id: s.organization_id,
-            tenant_id: s.tenant_id,
+            organization_id: s.organization_public_id
+                .unwrap_or_else(|| s.organization_id.to_string()),
+            tenant_id: s.tenant_public_id
+                .unwrap_or_else(|| s.tenant_id.to_string()),
             max_keys_per_user: s.max_keys_per_user,
             key_length: s.key_length,
             default_ttl_seconds: s.default_ttl_seconds,

@@ -57,8 +57,13 @@ impl TenantRepository {
                 )
                 RETURNING *
             )
-            SELECT ins.*, o.public_id AS organization_public_id
-            FROM ins JOIN organizations o ON o.id = ins.organization_id
+            SELECT ins.*, o.public_id AS organization_public_id,
+                   creator.public_id AS created_by_public_id,
+                   updater.public_id AS updated_by_public_id
+            FROM ins
+            JOIN organizations o ON o.id = ins.organization_id
+            LEFT JOIN identity.users creator ON creator.id = ins.created_by
+            LEFT JOIN identity.users updater ON updater.id = ins.updated_by
             "#,
         )
         .bind(id)
@@ -82,9 +87,13 @@ impl TenantRepository {
 
         let tenant = sqlx::query_as::<_, Tenant>(
             r#"
-            SELECT t.*, o.public_id AS organization_public_id
+            SELECT t.*, o.public_id AS organization_public_id,
+                   creator.public_id AS created_by_public_id,
+                   updater.public_id AS updated_by_public_id
             FROM tenants t
             JOIN organizations o ON o.id = t.organization_id
+            LEFT JOIN identity.users creator ON creator.id = t.created_by
+            LEFT JOIN identity.users updater ON updater.id = t.updated_by
             WHERE t.public_id = $1
             "#,
         )
@@ -117,8 +126,13 @@ impl TenantRepository {
                 WHERE public_id = $6 AND deleted_at IS NULL
                 RETURNING *
             )
-            SELECT upd.*, o.public_id AS organization_public_id
-            FROM upd JOIN organizations o ON o.id = upd.organization_id
+            SELECT upd.*, o.public_id AS organization_public_id,
+                   creator.public_id AS created_by_public_id,
+                   updater.public_id AS updated_by_public_id
+            FROM upd
+            JOIN organizations o ON o.id = upd.organization_id
+            LEFT JOIN identity.users creator ON creator.id = upd.created_by
+            LEFT JOIN identity.users updater ON updater.id = upd.updated_by
             "#,
         )
         .bind(req.name)
@@ -180,8 +194,13 @@ impl TenantRepository {
                     WHERE public_id = $1 AND organization_id = $4 AND status = 'active' AND deleted_at IS NULL
                     RETURNING *
                 )
-                SELECT upd.*, o.public_id AS organization_public_id
-                FROM upd JOIN organizations o ON o.id = upd.organization_id
+                SELECT upd.*, o.public_id AS organization_public_id,
+                       creator.public_id AS created_by_public_id,
+                       updater.public_id AS updated_by_public_id
+                FROM upd
+                JOIN organizations o ON o.id = upd.organization_id
+                LEFT JOIN identity.users creator ON creator.id = upd.created_by
+                LEFT JOIN identity.users updater ON updater.id = upd.updated_by
                 "#,
             )
             .bind(public_id)
@@ -203,8 +222,13 @@ impl TenantRepository {
                     WHERE public_id = $1 AND status = 'active' AND deleted_at IS NULL
                     RETURNING *
                 )
-                SELECT upd.*, o.public_id AS organization_public_id
-                FROM upd JOIN organizations o ON o.id = upd.organization_id
+                SELECT upd.*, o.public_id AS organization_public_id,
+                       creator.public_id AS created_by_public_id,
+                       updater.public_id AS updated_by_public_id
+                FROM upd
+                JOIN organizations o ON o.id = upd.organization_id
+                LEFT JOIN identity.users creator ON creator.id = upd.created_by
+                LEFT JOIN identity.users updater ON updater.id = upd.updated_by
                 "#,
             )
             .bind(public_id)
@@ -240,8 +264,13 @@ impl TenantRepository {
                     WHERE public_id = $1 AND organization_id = $4 AND status = 'suspended' AND deleted_at IS NULL
                     RETURNING *
                 )
-                SELECT upd.*, o.public_id AS organization_public_id
-                FROM upd JOIN organizations o ON o.id = upd.organization_id
+                SELECT upd.*, o.public_id AS organization_public_id,
+                       creator.public_id AS created_by_public_id,
+                       updater.public_id AS updated_by_public_id
+                FROM upd
+                JOIN organizations o ON o.id = upd.organization_id
+                LEFT JOIN identity.users creator ON creator.id = upd.created_by
+                LEFT JOIN identity.users updater ON updater.id = upd.updated_by
                 "#,
             )
             .bind(public_id)
@@ -263,8 +292,13 @@ impl TenantRepository {
                     WHERE public_id = $1 AND status = 'suspended' AND deleted_at IS NULL
                     RETURNING *
                 )
-                SELECT upd.*, o.public_id AS organization_public_id
-                FROM upd JOIN organizations o ON o.id = upd.organization_id
+                SELECT upd.*, o.public_id AS organization_public_id,
+                       creator.public_id AS created_by_public_id,
+                       updater.public_id AS updated_by_public_id
+                FROM upd
+                JOIN organizations o ON o.id = upd.organization_id
+                LEFT JOIN identity.users creator ON creator.id = upd.created_by
+                LEFT JOIN identity.users updater ON updater.id = upd.updated_by
                 "#,
             )
             .bind(public_id)
@@ -287,8 +321,13 @@ impl TenantRepository {
         debug!(limit = limit, "listing tenants");
 
         let mut qb = QueryBuilder::<sqlx::Postgres>::new(
-            "SELECT t.*, o.public_id AS organization_public_id \
-             FROM tenants t JOIN organizations o ON o.id = t.organization_id \
+            "SELECT t.*, o.public_id AS organization_public_id, \
+             creator.public_id AS created_by_public_id, \
+             updater.public_id AS updated_by_public_id \
+             FROM tenants t \
+             JOIN organizations o ON o.id = t.organization_id \
+             LEFT JOIN identity.users creator ON creator.id = t.created_by \
+             LEFT JOIN identity.users updater ON updater.id = t.updated_by \
              WHERE t.deleted_at IS NULL",
         );
 

@@ -53,6 +53,10 @@ impl BootstrapService {
 
         let mut tx = self.pool.begin().await?;
 
+        // Pre-generate the owner user ID so it can be used as created_by for all resources.
+        let user_id = Uuid::now_v7();
+        let user_public_id = format!("usr_{}", NanoId::generate(20));
+
         // ── 1. Organization ───────────────────────────────────────────────────
         let org_id = Uuid::now_v7();
         let org_public_id = format!("org_{}", NanoId::generate(20));
@@ -80,7 +84,7 @@ impl BootstrapService {
         .bind(&req.owner_email)
         .bind(req.external_id.as_deref())
         .bind(Json(req.tags.clone().unwrap_or_default()))
-        .bind(ctx.created_by)
+        .bind(user_id)
         .bind(ctx.request_id)
         .fetch_one(&mut *tx)
         .await?;
@@ -89,20 +93,21 @@ impl BootstrapService {
         let tenant_id = Uuid::now_v7();
         let tenant_public_id = format!("ten_{}", NanoId::generate(20));
         let tenant_name = format!("{} Default", req.name.trim());
+        let tenant_description = "Default tenant created on organization signup.";
         let empty_map = Json(HashMap::<String, String>::new());
 
         let tenant = sqlx::query_as::<_, Tenant>(
             r#"
             WITH ins AS (
                 INSERT INTO tenants (
-                    id, public_id, organization_id, name,
+                    id, public_id, organization_id, name, description,
                     tags, metadata, settings,
                     created_by, updated_by, request_id, version,
                     created_at, updated_at
                 ) VALUES (
-                    $1, $2, $3, $4,
-                    $5, $6, $7,
-                    $8, $8, $9, 0,
+                    $1, $2, $3, $4, $5,
+                    $6, $7, $8,
+                    $9, $9, $10, 0,
                     NOW(), NOW()
                 )
                 RETURNING *
@@ -115,10 +120,11 @@ impl BootstrapService {
         .bind(&tenant_public_id)
         .bind(org_id)
         .bind(&tenant_name)
+        .bind(tenant_description)
         .bind(&empty_map)
         .bind(&empty_map)
         .bind(&empty_map)
-        .bind(ctx.created_by)
+        .bind(user_id)
         .bind(ctx.request_id)
         .fetch_one(&mut *tx)
         .await?;
@@ -129,13 +135,13 @@ impl BootstrapService {
         let env = sqlx::query_as::<_, Environment>(
             r#"
             INSERT INTO environments (
-                id, public_id, tenant_id, name, tags,
+                id, public_id, tenant_id, name, description, tags,
                 request_id, version, created_by, updated_by, created_at, updated_at
             ) VALUES (
-                gen_random_uuid(), $1, $2, 'production', $3,
+                gen_random_uuid(), $1, $2, 'production', NULL, $3,
                 $4, 0, $5, $5, NOW(), NOW()
             )
-            RETURNING id, public_id, tenant_id, name, status, tags,
+            RETURNING id, public_id, tenant_id, name, description, status, tags,
                       version, created_by, updated_by, created_at, updated_at
             "#,
         )
@@ -143,14 +149,11 @@ impl BootstrapService {
         .bind(tenant_id)
         .bind(Json(HashMap::<String, String>::new()))
         .bind(ctx.request_id)
-        .bind(ctx.created_by)
+        .bind(user_id)
         .fetch_one(&mut *tx)
         .await?;
 
         // ── 4. Owner user ─────────────────────────────────────────────────────
-        let user_id = Uuid::now_v7();
-        let user_public_id = format!("usr_{}", NanoId::generate(20));
-
         let user = sqlx::query_as::<_, User>(
             r#"
             INSERT INTO identity.users (
@@ -175,7 +178,7 @@ impl BootstrapService {
         .bind(&empty_map)
         .bind(&empty_map)
         .bind(&empty_map)
-        .bind(ctx.created_by)
+        .bind(user_id)
         .bind(ctx.request_id)
         .fetch_one(&mut *tx)
         .await?;
@@ -210,7 +213,7 @@ impl BootstrapService {
         .bind(&key_prefix)
         .bind(&env_public_id)
         .bind(ctx.request_id)
-        .bind(ctx.created_by)
+        .bind(user_id)
         .fetch_one(&mut *tx)
         .await?;
 
@@ -235,14 +238,41 @@ impl BootstrapService {
             warn!(tenant_id = %tenant_id, error = ?e, "failed to seed default roles during bootstrap");
         }
 
+        // The INSERT RETURNING values above don't include JOINed public IDs.
+        // We already have them as local variables, so override them directly.
         let mut api_key_response = ApiKeyResponse::from(api_key);
         api_key_response.key = Some(full_key);
+        api_key_response.organization_id = org_public_id.clone();
+        api_key_response.tenant_id = tenant_public_id.clone();
+        api_key_response.user_id = user_public_id.clone();
+        api_key_response.created_by = user_public_id.clone();
+        api_key_response.updated_by = user_public_id.clone();
+
+        let mut env_response = EnvironmentResponse::from(env);
+        env_response.organization_id = org_public_id.clone();
+        env_response.tenant_id = tenant_public_id.clone();
+        env_response.created_by = user_public_id.clone();
+        env_response.updated_by = user_public_id.clone();
+
+        let mut user_response = UserResponse::from(user);
+        user_response.organization_id = org_public_id.clone();
+        user_response.tenant_id = tenant_public_id.clone();
+        user_response.created_by = user_public_id.clone();
+        user_response.updated_by = user_public_id.clone();
+
+        let mut org_response = OrganizationResponse::from(org);
+        org_response.created_by = user_public_id.clone();
+        org_response.updated_by = user_public_id.clone();
+
+        let mut tenant_response = TenantResponse::from(tenant);
+        tenant_response.created_by = user_public_id.clone();
+        tenant_response.updated_by = user_public_id.clone();
 
         Ok(BootstrapResponse {
-            organization: OrganizationResponse::from(org),
-            tenant: TenantResponse::from(tenant),
-            environment: EnvironmentResponse::from(env),
-            user: UserResponse::from(user),
+            organization: org_response,
+            tenant: tenant_response,
+            environment: env_response,
+            user: user_response,
             api_key: api_key_response,
         })
     }

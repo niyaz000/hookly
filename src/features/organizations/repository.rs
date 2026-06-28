@@ -12,6 +12,26 @@ use super::models::{
     CreateOrganizationRequest, Organization, OrganizationStatus, UpdateOrganizationRequest,
 };
 
+// Explicit column list for SELECT with LEFT JOINs to get public IDs.
+const SELECT_ORG_COLS: &str = "
+    o.id, o.public_id, o.name, o.slug, o.status,
+    o.owner_email, o.plan, o.stripe_customer_id, o.external_id,
+    o.tags, o.metadata, o.settings,
+    o.created_by, o.updated_by, o.version,
+    o.created_at, o.updated_at, o.deleted_at,
+    creator.public_id AS created_by_public_id,
+    updater.public_id AS updated_by_public_id
+";
+
+// Columns for INSERT/UPDATE RETURNING (no JOINs possible inside DML).
+const RETURNING_ORG_COLS: &str = "
+    id, public_id, name, slug, status,
+    owner_email, plan, stripe_customer_id, external_id,
+    tags, metadata, settings,
+    created_by, updated_by, version,
+    created_at, updated_at, deleted_at
+";
+
 pub struct OrganizationRepository {
     pool: PgPool,
 }
@@ -30,24 +50,30 @@ impl OrganizationRepository {
         let public_id = format!("org_{}", NanoId::generate(20));
         let now = Utc::now();
 
-        let org = sqlx::query_as::<_, Organization>(
+        let org = sqlx::query_as::<_, Organization>(&format!(
             r#"
-            INSERT INTO organizations (
-                id, public_id, name, slug,
-                owner_email, external_id,
-                tags,
-                created_by, updated_by, request_id, version,
-                created_at, updated_at
-            ) VALUES (
-                $1, $2, $3, $4,
-                $5, $6,
-                $7,
-                $8, $8, $9, $10,
-                $11, $11
+            WITH ins AS (
+                INSERT INTO organizations (
+                    id, public_id, name, slug,
+                    owner_email, external_id,
+                    tags,
+                    created_by, updated_by, request_id, version,
+                    created_at, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4,
+                    $5, $6,
+                    $7,
+                    $8, $8, $9, $10,
+                    $11, $11
+                )
+                RETURNING {RETURNING_ORG_COLS}
             )
-            RETURNING *
+            SELECT {SELECT_ORG_COLS}
+            FROM ins o
+            LEFT JOIN identity.users creator ON creator.id = o.created_by
+            LEFT JOIN identity.users updater ON updater.id = o.updated_by
             "#,
-        )
+        ))
         .bind(id)
         .bind(&public_id)
         .bind(&req.name.trim())
@@ -71,11 +97,18 @@ impl OrganizationRepository {
     ) -> Result<Option<Organization>, AppError> {
         debug!(public_id = %public_id, "querying organization");
 
-        let org =
-            sqlx::query_as::<_, Organization>("SELECT * FROM organizations WHERE public_id = $1")
-                .bind(public_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let org = sqlx::query_as::<_, Organization>(&format!(
+            r#"
+            SELECT {SELECT_ORG_COLS}
+            FROM organizations o
+            LEFT JOIN identity.users creator ON creator.id = o.created_by
+            LEFT JOIN identity.users updater ON updater.id = o.updated_by
+            WHERE o.public_id = $1
+            "#
+        ))
+        .bind(public_id)
+        .fetch_optional(&self.pool)
+        .await?;
 
         Ok(org)
     }
@@ -88,22 +121,28 @@ impl OrganizationRepository {
     ) -> Result<Option<Organization>, AppError> {
         debug!(public_id = %public_id, "updating organization");
 
-        let org = sqlx::query_as::<_, Organization>(
+        let org = sqlx::query_as::<_, Organization>(&format!(
             r#"
-            UPDATE organizations SET
-                name        = COALESCE($1, name),
-                slug        = COALESCE($2, slug),
-                owner_email = COALESCE($3, owner_email),
-                external_id = COALESCE($4, external_id),
-                tags        = COALESCE($5, tags),
-                updated_by  = $6,
-                request_id  = $7,
-                version     = version + 1,
-                updated_at  = NOW()
-            WHERE public_id = $8 AND deleted_at IS NULL
-            RETURNING *
+            WITH upd AS (
+                UPDATE organizations SET
+                    name        = COALESCE($1, name),
+                    slug        = COALESCE($2, slug),
+                    owner_email = COALESCE($3, owner_email),
+                    external_id = COALESCE($4, external_id),
+                    tags        = COALESCE($5, tags),
+                    updated_by  = $6,
+                    request_id  = $7,
+                    version     = version + 1,
+                    updated_at  = NOW()
+                WHERE public_id = $8 AND deleted_at IS NULL
+                RETURNING {RETURNING_ORG_COLS}
+            )
+            SELECT {SELECT_ORG_COLS}
+            FROM upd o
+            LEFT JOIN identity.users creator ON creator.id = o.created_by
+            LEFT JOIN identity.users updater ON updater.id = o.updated_by
             "#,
-        )
+        ))
         .bind(req.name)
         .bind(req.slug)
         .bind(req.owner_email)
@@ -154,18 +193,24 @@ impl OrganizationRepository {
         debug!(public_id = %public_id, "suspending organization");
 
         let org = if let Some(org_id) = caller_org_id {
-            sqlx::query_as::<_, Organization>(
+            sqlx::query_as::<_, Organization>(&format!(
                 r#"
-                UPDATE organizations SET
-                    status     = 'suspended',
-                    updated_by = $2,
-                    request_id = $3,
-                    version    = version + 1,
-                    updated_at = NOW()
-                WHERE public_id = $1 AND id = $4 AND status = 'active' AND deleted_at IS NULL
-                RETURNING *
+                WITH upd AS (
+                    UPDATE organizations SET
+                        status     = 'suspended',
+                        updated_by = $2,
+                        request_id = $3,
+                        version    = version + 1,
+                        updated_at = NOW()
+                    WHERE public_id = $1 AND id = $4 AND status = 'active' AND deleted_at IS NULL
+                    RETURNING {RETURNING_ORG_COLS}
+                )
+                SELECT {SELECT_ORG_COLS}
+                FROM upd o
+                LEFT JOIN identity.users creator ON creator.id = o.created_by
+                LEFT JOIN identity.users updater ON updater.id = o.updated_by
                 "#,
-            )
+            ))
             .bind(public_id)
             .bind(ctx.created_by)
             .bind(ctx.request_id)
@@ -173,18 +218,24 @@ impl OrganizationRepository {
             .fetch_optional(&self.pool)
             .await?
         } else {
-            sqlx::query_as::<_, Organization>(
+            sqlx::query_as::<_, Organization>(&format!(
                 r#"
-                UPDATE organizations SET
-                    status     = 'suspended',
-                    updated_by = $2,
-                    request_id = $3,
-                    version    = version + 1,
-                    updated_at = NOW()
-                WHERE public_id = $1 AND status = 'active' AND deleted_at IS NULL
-                RETURNING *
+                WITH upd AS (
+                    UPDATE organizations SET
+                        status     = 'suspended',
+                        updated_by = $2,
+                        request_id = $3,
+                        version    = version + 1,
+                        updated_at = NOW()
+                    WHERE public_id = $1 AND status = 'active' AND deleted_at IS NULL
+                    RETURNING {RETURNING_ORG_COLS}
+                )
+                SELECT {SELECT_ORG_COLS}
+                FROM upd o
+                LEFT JOIN identity.users creator ON creator.id = o.created_by
+                LEFT JOIN identity.users updater ON updater.id = o.updated_by
                 "#,
-            )
+            ))
             .bind(public_id)
             .bind(ctx.created_by)
             .bind(ctx.request_id)
@@ -202,19 +253,25 @@ impl OrganizationRepository {
     ) -> Result<Option<Organization>, AppError> {
         debug!(public_id = %public_id, "restoring organization");
 
-        let org = sqlx::query_as::<_, Organization>(
+        let org = sqlx::query_as::<_, Organization>(&format!(
             r#"
-            UPDATE organizations SET
-                deleted_at = NULL,
-                status     = 'active',
-                updated_by = $2,
-                request_id = $3,
-                version    = version + 1,
-                updated_at = NOW()
-            WHERE public_id = $1
-            RETURNING *
+            WITH upd AS (
+                UPDATE organizations SET
+                    deleted_at = NULL,
+                    status     = 'active',
+                    updated_by = $2,
+                    request_id = $3,
+                    version    = version + 1,
+                    updated_at = NOW()
+                WHERE public_id = $1
+                RETURNING {RETURNING_ORG_COLS}
+            )
+            SELECT {SELECT_ORG_COLS}
+            FROM upd o
+            LEFT JOIN identity.users creator ON creator.id = o.created_by
+            LEFT JOIN identity.users updater ON updater.id = o.updated_by
             "#,
-        )
+        ))
         .bind(public_id)
         .bind(ctx.created_by)
         .bind(ctx.request_id)
@@ -232,19 +289,24 @@ impl OrganizationRepository {
     ) -> Result<(Vec<Organization>, Option<Uuid>), AppError> {
         debug!(limit = limit, "listing organizations");
 
-        let mut qb = QueryBuilder::<sqlx::Postgres>::new(
-            "SELECT * FROM organizations WHERE deleted_at IS NULL",
-        );
+        let cols = SELECT_ORG_COLS;
+        let mut qb = QueryBuilder::<sqlx::Postgres>::new(format!(
+            "SELECT {cols} \
+            FROM organizations o \
+            LEFT JOIN identity.users creator ON creator.id = o.created_by \
+            LEFT JOIN identity.users updater ON updater.id = o.updated_by \
+            WHERE o.deleted_at IS NULL"
+        ));
 
         if let Some(cursor_id) = cursor {
-            qb.push(" AND id > ").push_bind(cursor_id);
+            qb.push(" AND o.id > ").push_bind(cursor_id);
         }
 
         if let Some(s) = status {
-            qb.push(" AND status = ").push_bind(s);
+            qb.push(" AND o.status = ").push_bind(s);
         }
 
-        qb.push(" ORDER BY id ASC LIMIT ").push_bind(limit + 1);
+        qb.push(" ORDER BY o.id ASC LIMIT ").push_bind(limit + 1);
 
         let mut orgs: Vec<Organization> = qb
             .build_query_as::<Organization>()

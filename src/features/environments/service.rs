@@ -37,7 +37,7 @@ impl EnvironmentService {
         let tags = serde_json::to_value(req.tags.unwrap_or_default())
             .unwrap_or(serde_json::Value::Object(Default::default()));
 
-        let env = self.repo.create(tenant_id, req.name, tags, ctx).await?;
+        let env = self.repo.create(tenant_id, req.name, req.description, tags, ctx).await?;
 
         info!(public_id = %env.public_id, "environment created");
         Ok(env)

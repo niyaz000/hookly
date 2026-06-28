@@ -38,6 +38,10 @@ pub struct Organization {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    #[sqlx(default)]
+    pub created_by_public_id: Option<String>,
+    #[sqlx(default)]
+    pub updated_by_public_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
@@ -102,8 +106,8 @@ pub struct OrganizationResponse {
     pub owner_email: Option<String>,
     pub external_id: Option<String>,
     pub tags: HashMap<String, String>,
-    pub created_by: Uuid,
-    pub updated_by: Uuid,
+    pub created_by: String,
+    pub updated_by: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -118,8 +122,8 @@ impl From<Organization> for OrganizationResponse {
             owner_email: org.owner_email,
             external_id: org.external_id,
             tags: org.tags.0,
-            created_by: org.created_by,
-            updated_by: org.updated_by,
+            created_by: org.created_by_public_id.unwrap_or_else(|| org.created_by.to_string()),
+            updated_by: org.updated_by_public_id.unwrap_or_else(|| org.updated_by.to_string()),
             created_at: org.created_at,
             updated_at: org.updated_at,
         }
