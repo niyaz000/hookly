@@ -14,22 +14,26 @@ fn counter_key(endpoint_id: Uuid) -> String {
     format!("hookly:rl:cnt:{endpoint_id}:{minute}")
 }
 
-/// Returns true if the endpoint has an active block key (set after a 429).
-/// Fails open (returns false) on Redis errors so a connectivity blip doesn't stall all delivery.
-pub async fn is_blocked(client: &redis::Client, endpoint_id: Uuid) -> bool {
+/// Returns the remaining TTL (seconds) on the block key if the endpoint is blocked,
+/// or None if it is not blocked. Fails open (returns None) on Redis errors.
+pub async fn blocked_remaining_secs(client: &redis::Client, endpoint_id: Uuid) -> Option<u64> {
     let mut conn = match client.get_multiplexed_async_connection().await {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(endpoint_id = %endpoint_id, "ratelimit: connect failed: {e}");
-            return false;
+            return None;
         }
     };
-    redis::cmd("EXISTS")
+    // TTL returns: positive = remaining seconds, -1 = no TTL, -2 = key absent
+    match redis::cmd("TTL")
         .arg(blocked_key(endpoint_id))
         .query_async::<i64>(&mut conn)
         .await
-        .unwrap_or(0)
-        > 0
+        .unwrap_or(-2)
+    {
+        t if t > 0 => Some(t as u64),
+        _ => None,
+    }
 }
 
 /// Atomically increments the per-minute counter and returns true if the call is

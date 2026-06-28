@@ -8,22 +8,27 @@ fn fail_key(endpoint_id: Uuid) -> String {
     format!("hookly:cb:fail:{endpoint_id}")
 }
 
-/// Returns true if the circuit is open (endpoint is unhealthy, skip delivery).
-/// Fails open (returns false) on Redis errors so a blip doesn't halt delivery.
-pub async fn is_open(client: &redis::Client, endpoint_id: Uuid) -> bool {
+/// Returns the remaining cooldown TTL (seconds) if the circuit is open, or None if closed.
+/// The TTL is used to schedule a precise defer rather than waiting for XAUTOCLAIM.
+/// Fails open (returns None) on Redis errors so a blip doesn't halt delivery.
+pub async fn open_remaining_secs(client: &redis::Client, endpoint_id: Uuid) -> Option<u64> {
     let mut conn = match client.get_multiplexed_async_connection().await {
         Ok(c) => c,
         Err(e) => {
             tracing::warn!(endpoint_id = %endpoint_id, "circuitbreaker: connect failed: {e}");
-            return false;
+            return None;
         }
     };
-    redis::cmd("EXISTS")
+    // TTL returns: positive = remaining seconds, -1 = no TTL, -2 = key absent
+    match redis::cmd("TTL")
         .arg(open_key(endpoint_id))
         .query_async::<i64>(&mut conn)
         .await
-        .unwrap_or(0)
-        > 0
+        .unwrap_or(-2)
+    {
+        t if t > 0 => Some(t as u64),
+        _ => None,
+    }
 }
 
 /// Records a delivery failure and returns true if the failure count crossed the

@@ -110,13 +110,12 @@ pub async fn run(
 
 /// Processes a single message end-to-end: fetch → guard checks → deliver → record → XACK.
 ///
-/// Does NOT XACK when:
-/// - DB fetch fails (XAUTOCLAIM will retry after idle threshold).
-/// - Endpoint is rate-limited or circuit is open — message stays in PEL and is
-///   reclaimed once the window or cooldown expires.
+/// Does NOT XACK only when the DB fetch fails — XAUTOCLAIM will retry after the
+/// idle threshold (genuine crash recovery path).
 ///
-/// Always XACKs after a real delivery attempt (success, failure, or timeout).
-/// The delivery_attempt row captures the outcome; the retry scheduler handles backoff.
+/// For intentional skips (rate limited, circuit open): XACKs immediately and calls
+/// defer_job so the outbox re-enqueues at the precise retry time. This keeps PEL
+/// strictly for crash recovery rather than conflating it with retry scheduling.
 pub async fn process_one(
     msg_id: &str,
     job_pub_id: &str,
@@ -141,38 +140,62 @@ pub async fn process_one(
         }
     };
 
-    // ── Rate limit checks ─────────────────────────────────────────────────────
+    // ── Guard checks: defer rather than leave in PEL ─────────────────────────
+    //
+    // All three guards XACK the message and call defer_job (no attempt increment)
+    // so the outbox re-enqueues at the right time. PEL is reserved for genuine
+    // crash recovery, not intentional skips with a known retry window.
 
-    // 1. Blocked by a prior 429 response.
-    if ratelimit::is_blocked(redis, job.endpoint_id).await {
+    // 1. Blocked by a prior 429 response — defer until the block key expires.
+    if let Some(remaining_secs) = ratelimit::blocked_remaining_secs(redis, job.endpoint_id).await {
+        let retry_at = Utc::now() + chrono::Duration::seconds(remaining_secs.max(1) as i64);
+        if let Err(e) = delivery_repo.defer_job(job.job_id, retry_at).await {
+            error!(job_public_id = %job.job_public_id, "defer_job (blocked) failed: {e:?}");
+        }
+        queue::xack(redis, stream, msg_id).await.ok();
         warn!(
             job_public_id = %job.job_public_id,
             endpoint_id   = %job.endpoint_id,
-            "endpoint blocked by prior 429, leaving in PEL for reclaim"
+            defer_secs    = remaining_secs,
+            "endpoint blocked by prior 429, deferred"
         );
-        return; // Don't XACK
+        return;
     }
 
-    // 2. Circuit open — endpoint is consistently failing, skip until cooldown expires.
-    if circuitbreaker::is_open(redis, job.endpoint_id).await {
+    // 2. Circuit open — defer until cooldown expires.
+    if let Some(remaining_secs) = circuitbreaker::open_remaining_secs(redis, job.endpoint_id).await {
+        let retry_at = Utc::now() + chrono::Duration::seconds(remaining_secs.max(1) as i64);
+        if let Err(e) = delivery_repo.defer_job(job.job_id, retry_at).await {
+            error!(job_public_id = %job.job_public_id, "defer_job (circuit open) failed: {e:?}");
+        }
+        queue::xack(redis, stream, msg_id).await.ok();
         warn!(
             job_public_id = %job.job_public_id,
             endpoint_id   = %job.endpoint_id,
-            "circuit open, leaving in PEL for reclaim"
+            defer_secs    = remaining_secs,
+            "circuit open, deferred"
         );
-        return; // Don't XACK
+        return;
     }
 
-    // 3. Proactive per-minute rate limit enforced by the endpoint's config.
+    // 3. Proactive per-minute rate limit — defer until the next minute bucket.
     if let Some(limit) = job.rate_limit_per_minute {
         if !ratelimit::try_acquire(redis, job.endpoint_id, limit).await {
+            let now_secs = Utc::now().timestamp() as u64;
+            let secs_to_next_minute = 60 - (now_secs % 60);
+            let retry_at = Utc::now() + chrono::Duration::seconds(secs_to_next_minute as i64);
+            if let Err(e) = delivery_repo.defer_job(job.job_id, retry_at).await {
+                error!(job_public_id = %job.job_public_id, "defer_job (rate limit) failed: {e:?}");
+            }
+            queue::xack(redis, stream, msg_id).await.ok();
             warn!(
                 job_public_id = %job.job_public_id,
                 endpoint_id   = %job.endpoint_id,
                 limit_per_min = limit,
-                "rate limit exceeded, leaving in PEL for reclaim"
+                defer_secs    = secs_to_next_minute,
+                "rate limit exceeded, deferred until next minute"
             );
-            return; // Don't XACK
+            return;
         }
     }
 

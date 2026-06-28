@@ -169,6 +169,31 @@ impl DeliveryRepository {
         Ok(())
     }
 
+    /// Defers a job without consuming a retry attempt — used when delivery is
+    /// intentionally skipped (rate limit, circuit open) rather than actually tried.
+    /// Sets status='retrying' and clears enqueued_at so the outbox re-enqueues
+    /// once retry_after has passed, but does NOT increment the attempt counter.
+    #[allow(dead_code)]
+    pub async fn defer_job(
+        &self,
+        job_id: Uuid,
+        retry_after: DateTime<Utc>,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            r#"UPDATE delivery_jobs
+               SET status      = 'retrying',
+                   retry_after = $2,
+                   enqueued_at = NULL
+               WHERE id = $1"#,
+        )
+        .bind(job_id)
+        .bind(retry_after)
+        .execute(&self.db)
+        .await
+        .map_err(AppError::from)?;
+        Ok(())
+    }
+
     /// Schedules a retry by setting status='retrying', recording when to next
     /// attempt, and clearing enqueued_at so the outbox poller re-enqueues the
     /// job once retry_after has passed.
