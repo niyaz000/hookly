@@ -2,10 +2,10 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::features::permissions::repository::PermissionRepository;
-use crate::features::roles::repository::RoleRepository;
 use crate::common::{types::RequestContext, validators};
 use crate::error::AppError;
+use crate::features::permissions::repository::PermissionRepository;
+use crate::features::roles::repository::RoleRepository;
 
 use super::{
     models::{
@@ -41,7 +41,9 @@ impl TenantService {
         ctx: RequestContext,
     ) -> Result<TenantResponse, AppError> {
         req.validate()?;
-        if let Some(t) = &req.tags { validators::validate_tags(t)?; }
+        if let Some(t) = &req.tags {
+            validators::validate_tags(t)?;
+        }
 
         let organization_id = self
             .repo
@@ -90,7 +92,9 @@ impl TenantService {
         ctx: RequestContext,
     ) -> Result<TenantResponse, AppError> {
         req.validate()?;
-        if let Some(t) = &req.tags { validators::validate_tags(t)?; }
+        if let Some(t) = &req.tags {
+            validators::validate_tags(t)?;
+        }
         info!("updating tenant");
         let tenant = self
             .repo
@@ -120,15 +124,20 @@ impl TenantService {
     pub async fn suspend(
         &self,
         public_id: String,
+        caller_org_id: Option<uuid::Uuid>,
         ctx: RequestContext,
     ) -> Result<TenantResponse, AppError> {
         info!("suspending tenant");
-        let tenant = self.repo.suspend(&public_id, ctx).await?.ok_or_else(|| {
-            warn!("tenant not found or not active");
-            AppError::NotFound(format!(
-                "Tenant not found or not in active state: {public_id}"
-            ))
-        })?;
+        let tenant = self
+            .repo
+            .suspend(&public_id, caller_org_id, ctx)
+            .await?
+            .ok_or_else(|| {
+                warn!("tenant not found or not active");
+                AppError::NotFound(format!(
+                    "Tenant not found or not in active state: {public_id}"
+                ))
+            })?;
         info!("tenant suspended");
         Ok(TenantResponse::from(tenant))
     }
@@ -137,12 +146,13 @@ impl TenantService {
     pub async fn reactivate(
         &self,
         public_id: String,
+        caller_org_id: Option<uuid::Uuid>,
         ctx: RequestContext,
     ) -> Result<TenantResponse, AppError> {
         info!("reactivating tenant");
         let tenant = self
             .repo
-            .reactivate(&public_id, ctx)
+            .reactivate(&public_id, caller_org_id, ctx)
             .await?
             .ok_or_else(|| {
                 warn!("tenant not found or not suspended");

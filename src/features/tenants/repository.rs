@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use sqlx::{types::Json, PgPool, QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
@@ -65,8 +67,8 @@ impl TenantRepository {
         .bind(&req.name)
         .bind(req.description.as_deref())
         .bind(Json(req.tags.unwrap_or_default()))
-        .bind(Json(req.metadata.unwrap_or_default()))
-        .bind(Json(req.settings.unwrap_or_default()))
+        .bind(Json(HashMap::<String, String>::new()))
+        .bind(Json(HashMap::<String, String>::new()))
         .bind(ctx.created_by)
         .bind(ctx.request_id)
         .fetch_one(&self.pool)
@@ -108,13 +110,11 @@ impl TenantRepository {
                     name        = COALESCE($1, name),
                     description = COALESCE($2, description),
                     tags        = COALESCE($3, tags),
-                    metadata    = COALESCE($4, metadata),
-                    settings    = COALESCE($5, settings),
-                    updated_by  = $6,
-                    request_id  = $7,
+                    updated_by  = $4,
+                    request_id  = $5,
                     version     = version + 1,
                     updated_at  = NOW()
-                WHERE public_id = $8 AND deleted_at IS NULL
+                WHERE public_id = $6 AND deleted_at IS NULL
                 RETURNING *
             )
             SELECT upd.*, o.public_id AS organization_public_id
@@ -124,8 +124,6 @@ impl TenantRepository {
         .bind(req.name)
         .bind(req.description)
         .bind(req.tags.map(Json))
-        .bind(req.metadata.map(Json))
-        .bind(req.settings.map(Json))
         .bind(ctx.created_by)
         .bind(ctx.request_id)
         .bind(public_id)
@@ -159,66 +157,122 @@ impl TenantRepository {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Suspend a tenant. When `caller_org_id` is Some, the UPDATE is scoped to
+    /// that organization — enforcing ownership. Pass None for admin paths.
     pub async fn suspend(
         &self,
         public_id: &str,
+        caller_org_id: Option<Uuid>,
         ctx: RequestContext,
     ) -> Result<Option<Tenant>, AppError> {
         debug!(public_id = %public_id, "suspending tenant");
 
-        let tenant = sqlx::query_as::<_, Tenant>(
-            r#"
-            WITH upd AS (
-                UPDATE tenants SET
-                    status     = 'suspended',
-                    updated_by = $2,
-                    request_id = $3,
-                    version    = version + 1,
-                    updated_at = NOW()
-                WHERE public_id = $1 AND status = 'active' AND deleted_at IS NULL
-                RETURNING *
+        let tenant = if let Some(org_id) = caller_org_id {
+            sqlx::query_as::<_, Tenant>(
+                r#"
+                WITH upd AS (
+                    UPDATE tenants SET
+                        status     = 'suspended',
+                        updated_by = $2,
+                        request_id = $3,
+                        version    = version + 1,
+                        updated_at = NOW()
+                    WHERE public_id = $1 AND organization_id = $4 AND status = 'active' AND deleted_at IS NULL
+                    RETURNING *
+                )
+                SELECT upd.*, o.public_id AS organization_public_id
+                FROM upd JOIN organizations o ON o.id = upd.organization_id
+                "#,
             )
-            SELECT upd.*, o.public_id AS organization_public_id
-            FROM upd JOIN organizations o ON o.id = upd.organization_id
-            "#,
-        )
-        .bind(public_id)
-        .bind(ctx.created_by)
-        .bind(ctx.request_id)
-        .fetch_optional(&self.pool)
-        .await?;
+            .bind(public_id)
+            .bind(ctx.created_by)
+            .bind(ctx.request_id)
+            .bind(org_id)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, Tenant>(
+                r#"
+                WITH upd AS (
+                    UPDATE tenants SET
+                        status     = 'suspended',
+                        updated_by = $2,
+                        request_id = $3,
+                        version    = version + 1,
+                        updated_at = NOW()
+                    WHERE public_id = $1 AND status = 'active' AND deleted_at IS NULL
+                    RETURNING *
+                )
+                SELECT upd.*, o.public_id AS organization_public_id
+                FROM upd JOIN organizations o ON o.id = upd.organization_id
+                "#,
+            )
+            .bind(public_id)
+            .bind(ctx.created_by)
+            .bind(ctx.request_id)
+            .fetch_optional(&self.pool)
+            .await?
+        };
 
         Ok(tenant)
     }
 
+    /// Reactivate a suspended tenant. When `caller_org_id` is Some, the UPDATE is
+    /// scoped to that organization — enforcing ownership. Pass None for admin paths.
     pub async fn reactivate(
         &self,
         public_id: &str,
+        caller_org_id: Option<Uuid>,
         ctx: RequestContext,
     ) -> Result<Option<Tenant>, AppError> {
         debug!(public_id = %public_id, "reactivating tenant");
 
-        let tenant = sqlx::query_as::<_, Tenant>(
-            r#"
-            WITH upd AS (
-                UPDATE tenants SET
-                    status     = 'active',
-                    updated_by = $2,
-                    request_id = $3,
-                    version    = version + 1,
-                    updated_at = NOW()
-                WHERE public_id = $1 AND status = 'suspended' AND deleted_at IS NULL
-                RETURNING *
+        let tenant = if let Some(org_id) = caller_org_id {
+            sqlx::query_as::<_, Tenant>(
+                r#"
+                WITH upd AS (
+                    UPDATE tenants SET
+                        status     = 'active',
+                        updated_by = $2,
+                        request_id = $3,
+                        version    = version + 1,
+                        updated_at = NOW()
+                    WHERE public_id = $1 AND organization_id = $4 AND status = 'suspended' AND deleted_at IS NULL
+                    RETURNING *
+                )
+                SELECT upd.*, o.public_id AS organization_public_id
+                FROM upd JOIN organizations o ON o.id = upd.organization_id
+                "#,
             )
-            SELECT upd.*, o.public_id AS organization_public_id
-            FROM upd JOIN organizations o ON o.id = upd.organization_id
-            "#,
-        )
-        .bind(public_id)
-        .bind(ctx.created_by)
-        .bind(ctx.request_id)
-        .fetch_optional(&self.pool)
-        .await?;
+            .bind(public_id)
+            .bind(ctx.created_by)
+            .bind(ctx.request_id)
+            .bind(org_id)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, Tenant>(
+                r#"
+                WITH upd AS (
+                    UPDATE tenants SET
+                        status     = 'active',
+                        updated_by = $2,
+                        request_id = $3,
+                        version    = version + 1,
+                        updated_at = NOW()
+                    WHERE public_id = $1 AND status = 'suspended' AND deleted_at IS NULL
+                    RETURNING *
+                )
+                SELECT upd.*, o.public_id AS organization_public_id
+                FROM upd JOIN organizations o ON o.id = upd.organization_id
+                "#,
+            )
+            .bind(public_id)
+            .bind(ctx.created_by)
+            .bind(ctx.request_id)
+            .fetch_optional(&self.pool)
+            .await?
+        };
 
         Ok(tenant)
     }

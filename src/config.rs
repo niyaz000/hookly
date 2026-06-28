@@ -7,6 +7,14 @@ pub struct Config {
     pub redis: RedisConfig,
     pub crypto: CryptoConfig,
     pub otel: OtelConfig,
+    pub admin: AdminConfig,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct AdminConfig {
+    /// Long random secret used to authenticate Hookly platform-level API calls.
+    /// Generate with: openssl rand -hex 40
+    pub api_key: String,
 }
 
 /// Optional OpenTelemetry export. Disabled when OTEL_EXPORTER_OTLP_ENDPOINT is unset.
@@ -48,6 +56,7 @@ impl Config {
             redis: envy::prefixed("REDIS_").from_env()?,
             crypto: envy::prefixed("CRYPTO_").from_env()?,
             otel: envy::prefixed("OTEL_").from_env().unwrap_or_default(),
+            admin: envy::prefixed("ADMIN_").from_env()?,
         })
     }
 }

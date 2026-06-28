@@ -1,4 +1,5 @@
 pub mod api_keys;
+pub mod platform;
 pub mod applications;
 pub mod assignments;
 pub mod delivery;

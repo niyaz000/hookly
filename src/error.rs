@@ -88,6 +88,7 @@ pub enum AppError {
     Conflict(String, Vec<FieldError>),
     Internal(String),
     Unauthorized(String),
+    Forbidden(String),
     PayloadTooLarge,
     UriTooLong,
 }
@@ -136,6 +137,10 @@ impl IntoResponse for AppError {
             AppError::Unauthorized(msg) => (
                 StatusCode::UNAUTHORIZED,
                 ErrorBody::new("unauthorized", msg),
+            ),
+            AppError::Forbidden(msg) => (
+                StatusCode::FORBIDDEN,
+                ErrorBody::new("forbidden", msg),
             ),
             AppError::PayloadTooLarge => (
                 StatusCode::PAYLOAD_TOO_LARGE,
@@ -292,6 +297,7 @@ impl AppError {
             AppError::Validation(_) => (422, "validation_error", "Request validation failed".into()),
             AppError::Conflict(m, _) => (409, "conflict", m.clone()),
             AppError::Unauthorized(m) => (401, "unauthorized", m.clone()),
+            AppError::Forbidden(m) => (403, "forbidden", m.clone()),
             AppError::PayloadTooLarge => (413, "payload_too_large", "Request body exceeds the 256 KB limit".into()),
             AppError::UriTooLong => (414, "uri_too_long", "Request URI exceeds the 512 character limit".into()),
             AppError::Database(_) | AppError::Redis(_) | AppError::Internal(_) => {

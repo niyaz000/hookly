@@ -100,15 +100,20 @@ impl OrganizationService {
     pub async fn suspend(
         &self,
         public_id: String,
+        caller_org_id: Option<Uuid>,
         ctx: RequestContext,
     ) -> Result<OrganizationResponse, AppError> {
         info!("suspending organization");
-        let org = self.repo.suspend(&public_id, ctx).await?.ok_or_else(|| {
-            warn!("organization not found or not active");
-            AppError::NotFound(format!(
-                "Organization not found or not in active state: {public_id}"
-            ))
-        })?;
+        let org = self
+            .repo
+            .suspend(&public_id, caller_org_id, ctx)
+            .await?
+            .ok_or_else(|| {
+                warn!("organization not found or not active");
+                AppError::NotFound(format!(
+                    "Organization not found or not in active state: {public_id}"
+                ))
+            })?;
         info!("organization suspended");
         Ok(OrganizationResponse::from(org))
     }

@@ -46,8 +46,6 @@ pub struct CreateTenantRequest {
     pub name: String,
     pub description: Option<String>,
     pub tags: Option<HashMap<String, String>>,
-    pub metadata: Option<HashMap<String, String>>,
-    pub settings: Option<HashMap<String, String>>,
 }
 
 impl CreateTenantRequest {
@@ -63,8 +61,6 @@ pub struct UpdateTenantRequest {
     pub name: Option<String>,
     pub description: Option<String>,
     pub tags: Option<HashMap<String, String>>,
-    pub metadata: Option<HashMap<String, String>>,
-    pub settings: Option<HashMap<String, String>>,
 }
 
 impl UpdateTenantRequest {

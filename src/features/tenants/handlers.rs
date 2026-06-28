@@ -72,7 +72,11 @@ pub async fn suspend_tenant(
     Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<TenantResponse>, AppError> {
-    let tenant = service(state).suspend(public_id, ctx).await?;
+    validators::validate_id_prefix(&public_id, "ten_", "tenant")?;
+    // Scope the suspend to the caller's organization — prevents cross-org suspension.
+    let tenant = service(state)
+        .suspend(public_id, Some(ctx.organization_id), ctx)
+        .await?;
     Ok(Json(tenant))
 }
 
@@ -81,7 +85,11 @@ pub async fn reactivate_tenant(
     Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<TenantResponse>, AppError> {
-    let tenant = service(state).reactivate(public_id, ctx).await?;
+    validators::validate_id_prefix(&public_id, "ten_", "tenant")?;
+    // Scope the reactivate to the caller's organization — prevents cross-org changes.
+    let tenant = service(state)
+        .reactivate(public_id, Some(ctx.organization_id), ctx)
+        .await?;
     Ok(Json(tenant))
 }
 

@@ -142,30 +142,55 @@ impl OrganizationRepository {
         Ok(result.rows_affected() > 0)
     }
 
+    /// Suspend an organization. When `caller_org_id` is Some, the UPDATE is
+    /// scoped so only the org matching that internal UUID is affected — enforcing
+    /// ownership. Pass None for admin paths that bypass ownership.
     pub async fn suspend(
         &self,
         public_id: &str,
+        caller_org_id: Option<Uuid>,
         ctx: RequestContext,
     ) -> Result<Option<Organization>, AppError> {
         debug!(public_id = %public_id, "suspending organization");
 
-        let org = sqlx::query_as::<_, Organization>(
-            r#"
-            UPDATE organizations SET
-                status     = 'suspended',
-                updated_by = $2,
-                request_id = $3,
-                version    = version + 1,
-                updated_at = NOW()
-            WHERE public_id = $1 AND status = 'active' AND deleted_at IS NULL
-            RETURNING *
-            "#,
-        )
-        .bind(public_id)
-        .bind(ctx.created_by)
-        .bind(ctx.request_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let org = if let Some(org_id) = caller_org_id {
+            sqlx::query_as::<_, Organization>(
+                r#"
+                UPDATE organizations SET
+                    status     = 'suspended',
+                    updated_by = $2,
+                    request_id = $3,
+                    version    = version + 1,
+                    updated_at = NOW()
+                WHERE public_id = $1 AND id = $4 AND status = 'active' AND deleted_at IS NULL
+                RETURNING *
+                "#,
+            )
+            .bind(public_id)
+            .bind(ctx.created_by)
+            .bind(ctx.request_id)
+            .bind(org_id)
+            .fetch_optional(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, Organization>(
+                r#"
+                UPDATE organizations SET
+                    status     = 'suspended',
+                    updated_by = $2,
+                    request_id = $3,
+                    version    = version + 1,
+                    updated_at = NOW()
+                WHERE public_id = $1 AND status = 'active' AND deleted_at IS NULL
+                RETURNING *
+                "#,
+            )
+            .bind(public_id)
+            .bind(ctx.created_by)
+            .bind(ctx.request_id)
+            .fetch_optional(&self.pool)
+            .await?
+        };
 
         Ok(org)
     }

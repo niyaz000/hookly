@@ -15,6 +15,7 @@ pub struct AppState {
     pub crypto: TenantCrypto,
     pub email: Arc<dyn EmailService>,
     pub key_provider: Arc<dyn KeyProvider>,
+    pub admin_api_key: String,
 }
 
 impl AppState {
@@ -29,6 +30,13 @@ impl AppState {
                 .expect("Invalid CRYPTO_API_KEY_ENCRYPTION_KEY"),
         );
 
-        Ok(Self { db, redis, crypto, email, key_provider })
+        Ok(Self {
+            db,
+            redis,
+            crypto,
+            email,
+            key_provider,
+            admin_api_key: config.admin.api_key.clone(),
+        })
     }
 }

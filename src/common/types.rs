@@ -22,6 +22,8 @@ pub struct PaginatedResponse<T> {
 pub struct RequestContext {
     pub request_id: Uuid,
     pub created_by: Uuid,
+    pub organization_id: Uuid,
+    pub tenant_id: Uuid,
 }
 
 /// JSON body extractor that converts Axum's JsonRejection into a structured AppError.

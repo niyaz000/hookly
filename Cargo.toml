@@ -45,6 +45,7 @@ rand = "0.8"
 p256 = { version = "0.13", features = ["pkcs8", "pem"] }
 p384 = { version = "0.13", features = ["pkcs8", "pem"] }
 rsa = { version = "0.9", features = ["pem"] }
+jsonwebtoken = "9"
 
 [[bin]]
 name = "hookly"

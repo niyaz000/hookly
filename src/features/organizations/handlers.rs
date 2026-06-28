@@ -9,7 +9,7 @@ use crate::{
     error::AppError,
     features::organizations::{
         models::{
-            CreateOrganizationRequest, ListOrganizationsQuery, ListOrganizationsResponse,
+            ListOrganizationsQuery, ListOrganizationsResponse,
             OrganizationResponse, UpdateOrganizationRequest,
         },
         repository::OrganizationRepository,
@@ -20,15 +20,6 @@ use crate::{
 
 fn service(state: AppState) -> OrganizationService {
     OrganizationService::new(OrganizationRepository::new(state.db))
-}
-
-pub async fn create_organization(
-    State(state): State<AppState>,
-    Extension(ctx): Extension<RequestContext>,
-    ValidatedJson(payload): ValidatedJson<CreateOrganizationRequest>,
-) -> Result<(StatusCode, Json<OrganizationResponse>), AppError> {
-    let org = service(state).create(payload, ctx).await?;
-    Ok((StatusCode::CREATED, Json(org)))
 }
 
 pub async fn get_organization(
@@ -64,16 +55,11 @@ pub async fn suspend_organization(
     Extension(ctx): Extension<RequestContext>,
     Path(public_id): Path<String>,
 ) -> Result<Json<OrganizationResponse>, AppError> {
-    let org = service(state).suspend(public_id, ctx).await?;
-    Ok(Json(org))
-}
-
-pub async fn restore_organization(
-    State(state): State<AppState>,
-    Extension(ctx): Extension<RequestContext>,
-    Path(public_id): Path<String>,
-) -> Result<Json<OrganizationResponse>, AppError> {
-    let org = service(state).restore(public_id, ctx).await?;
+    validators::validate_id_prefix(&public_id, "org_", "organization")?;
+    // Scope the suspend to the caller's own org — prevents suspending someone else's org.
+    let org = service(state)
+        .suspend(public_id, Some(ctx.organization_id), ctx)
+        .await?;
     Ok(Json(org))
 }
 

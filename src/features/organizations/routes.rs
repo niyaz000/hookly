@@ -14,11 +14,6 @@ pub fn routes(state: AppState) -> Router {
                 .layer(SetHandlerName::of(&super::handlers::list_organizations)),
         )
         .route(
-            "/organizations",
-            post(super::handlers::create_organization)
-                .layer(SetHandlerName::of(&super::handlers::create_organization)),
-        )
-        .route(
             "/organizations/:public_id",
             get(super::handlers::get_organization)
                 .layer(SetHandlerName::of(&super::handlers::get_organization)),
@@ -37,11 +32,6 @@ pub fn routes(state: AppState) -> Router {
             "/organizations/:public_id/suspend",
             post(super::handlers::suspend_organization)
                 .layer(SetHandlerName::of(&super::handlers::suspend_organization)),
-        )
-        .route(
-            "/organizations/:public_id/restore",
-            post(super::handlers::restore_organization)
-                .layer(SetHandlerName::of(&super::handlers::restore_organization)),
         )
         .with_state(state)
 }
