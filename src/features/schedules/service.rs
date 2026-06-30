@@ -65,23 +65,8 @@ impl ScheduleService {
                 AppError::NotFound(format!("Application not found: {}", req.application_id))
             })?;
 
-        let tenant_id = self
-            .repo
-            .resolve_tenant(&req.tenant_id)
-            .await?
-            .ok_or_else(|| {
-                warn!(tenant_id = %req.tenant_id, "tenant not found");
-                AppError::NotFound(format!("Tenant not found: {}", req.tenant_id))
-            })?;
-
-        let organization_id = self
-            .repo
-            .resolve_organization(&req.organization_id)
-            .await?
-            .ok_or_else(|| {
-                warn!(organization_id = %req.organization_id, "organization not found");
-                AppError::NotFound(format!("Organization not found: {}", req.organization_id))
-            })?;
+        let tenant_id = ctx.tenant_id;
+        let organization_id = ctx.organization_id;
 
         let event_type_id = self
             .repo
@@ -366,38 +351,18 @@ impl ScheduleService {
         Ok(ScheduleExecutionResponse::from(execution))
     }
 
-    #[tracing::instrument(skip(self))]
-    pub async fn list(&self, query: ListSchedulesQuery) -> Result<ListSchedulesResponse, AppError> {
+    #[tracing::instrument(skip(self, ctx))]
+    pub async fn list(&self, query: ListSchedulesQuery, ctx: RequestContext) -> Result<ListSchedulesResponse, AppError> {
         let limit = query.limit.unwrap_or(20).clamp(1, 100);
         let cursor = query.cursor.as_deref().map(decode_cursor).transpose()?;
-
-        let organization_id = match query.organization_id {
-            Some(ref pid) => Some(
-                self.repo
-                    .resolve_organization(pid)
-                    .await?
-                    .ok_or_else(|| AppError::NotFound(format!("Organization not found: {pid}")))?,
-            ),
-            None => None,
-        };
-
-        let tenant_id = match query.tenant_id {
-            Some(ref pid) => Some(
-                self.repo
-                    .resolve_tenant(pid)
-                    .await?
-                    .ok_or_else(|| AppError::NotFound(format!("Tenant not found: {pid}")))?,
-            ),
-            None => None,
-        };
 
         let (rows, next_cursor_id) = self
             .repo
             .list(
                 limit,
                 cursor,
-                organization_id,
-                tenant_id,
+                Some(ctx.organization_id),
+                Some(ctx.tenant_id),
                 query.status.as_deref(),
             )
             .await?;

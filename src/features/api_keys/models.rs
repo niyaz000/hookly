@@ -79,8 +79,6 @@ pub struct ApiKeySettings {
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct CreateApiKeyRequest {
-    pub tenant_id: Uuid,
-    pub organization_id: Uuid,
     pub user_id: Uuid,
     #[validate(custom(function = "validate_not_blank", message = "name is required"))]
     #[validate(length(max = 64, message = "name must be 64 characters or fewer"))]
@@ -160,8 +158,6 @@ impl UpdateApiKeyRequest {
 
 #[derive(Debug, Deserialize, Serialize, Validate)]
 pub struct UpsertApiKeySettingsRequest {
-    pub organization_id: Uuid,
-    pub tenant_id: Uuid,
     pub max_keys_per_user: Option<i32>,
     pub key_length: i16,
     pub default_ttl_seconds: Option<i32>,
@@ -242,7 +238,6 @@ impl UpdateApiKeySettingsRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct ListApiKeysQuery {
-    pub tenant_id: Option<Uuid>,
     pub user_id: Option<Uuid>,
     pub environment_id: Option<String>,
     pub status: Option<ApiKeyStatus>,

@@ -362,6 +362,8 @@ impl ApiKeyRepository {
 
     pub async fn upsert_settings(
         &self,
+        organization_id: Uuid,
+        tenant_id: Uuid,
         req: &UpsertApiKeySettingsRequest,
         ctx: RequestContext,
     ) -> Result<ApiKeySettings, AppError> {
@@ -369,8 +371,8 @@ impl ApiKeyRepository {
         let public_id = format!("aks_{}", NanoId::new());
 
         debug!(
-            organization_id = %req.organization_id,
-            tenant_id = %req.tenant_id,
+            organization_id = %organization_id,
+            tenant_id = %tenant_id,
             "upserting api key settings"
         );
 
@@ -405,8 +407,8 @@ impl ApiKeyRepository {
         ))
         .bind(id)
         .bind(&public_id)
-        .bind(req.organization_id)
-        .bind(req.tenant_id)
+        .bind(organization_id)
+        .bind(tenant_id)
         .bind(req.max_keys_per_user)
         .bind(req.key_length)
         .bind(req.default_ttl_seconds)

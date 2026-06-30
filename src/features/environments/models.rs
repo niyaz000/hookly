@@ -43,7 +43,6 @@ pub struct Environment {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateEnvironmentRequest {
-    pub tenant_id: String,
     pub name: String,
     pub description: Option<String>,
     pub tags: Option<HashMap<String, String>>,
@@ -96,7 +95,6 @@ pub struct UpdateEnvironmentRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct ListEnvironmentsQuery {
-    pub tenant_id: Option<Uuid>,
     pub status: Option<EnvironmentStatus>,
     pub limit: Option<i64>,
     pub cursor: Option<String>,

@@ -107,9 +107,10 @@ pub async fn trigger_schedule(
 
 pub async fn list_schedules(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     QsQuery(query): QsQuery<ListSchedulesQuery>,
 ) -> Result<Json<ListSchedulesResponse>, AppError> {
-    let result = service(state).list(query).await?;
+    let result = service(state).list(query, ctx).await?;
     Ok(Json(result))
 }
 

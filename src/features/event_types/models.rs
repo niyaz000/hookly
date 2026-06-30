@@ -163,7 +163,6 @@ pub struct EventType {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateEventTypeRequest {
-    pub tenant_id: String,
     pub application_id: String,
     pub name: String,
     pub schema_version: Option<String>,
@@ -180,7 +179,6 @@ pub struct CreateVersionRequest {
 
 #[derive(Deserialize, Debug)]
 pub struct ListQueryParams {
-    pub tenant_id: String,
     pub name: Option<String>,
     pub schema_version: Option<String>,
     pub archived: Option<bool>,

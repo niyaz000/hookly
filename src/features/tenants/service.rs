@@ -34,7 +34,7 @@ impl TenantService {
         }
     }
 
-    #[tracing::instrument(skip(self, req, ctx), fields(name = %req.name, org = %req.organization_id))]
+    #[tracing::instrument(skip(self, req, ctx), fields(name = %req.name, org = %ctx.organization_id))]
     pub async fn create(
         &self,
         req: CreateTenantRequest,
@@ -45,17 +45,8 @@ impl TenantService {
             validators::validate_tags(t)?;
         }
 
-        let organization_id = self
-            .repo
-            .resolve_organization(&req.organization_id)
-            .await?
-            .ok_or_else(|| {
-                warn!(organization_id = %req.organization_id, "organization not found");
-                AppError::NotFound(format!("Organization not found: {}", req.organization_id))
-            })?;
-
-        info!(organization_id = %organization_id, "creating tenant");
-        let tenant = self.repo.create(req, organization_id, ctx).await?;
+        info!(organization_id = %ctx.organization_id, "creating tenant");
+        let tenant = self.repo.create(req, ctx.organization_id, ctx).await?;
         info!(public_id = %tenant.public_id, organization_id = %tenant.organization_id, "tenant created");
 
         // Seed default roles (owner, admin, developer, viewer) for the new tenant
@@ -164,14 +155,14 @@ impl TenantService {
         Ok(TenantResponse::from(tenant))
     }
 
-    #[tracing::instrument(skip(self))]
-    pub async fn list(&self, query: ListTenantsQuery) -> Result<ListTenantsResponse, AppError> {
+    #[tracing::instrument(skip(self, ctx))]
+    pub async fn list(&self, query: ListTenantsQuery, ctx: RequestContext) -> Result<ListTenantsResponse, AppError> {
         let limit = query.limit.unwrap_or(20).clamp(1, 100);
         let cursor = query.cursor.as_deref().map(decode_cursor).transpose()?;
 
         let (tenants, next_cursor_id) = self
             .repo
-            .list(limit, cursor, query.status, query.organization_id)
+            .list(limit, cursor, query.status, Some(ctx.organization_id))
             .await?;
 
         Ok(ListTenantsResponse {

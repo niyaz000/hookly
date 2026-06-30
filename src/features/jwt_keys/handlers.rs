@@ -49,9 +49,10 @@ pub async fn get_jwt_key(
 
 pub async fn list_jwt_keys(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     QsQuery(query): QsQuery<ListJwtKeysQuery>,
 ) -> Result<Json<ListJwtKeysResponse>, AppError> {
-    let resp = make_svc(state).list(query).await?;
+    let resp = make_svc(state).list(query, ctx).await?;
     Ok(Json(resp))
 }
 

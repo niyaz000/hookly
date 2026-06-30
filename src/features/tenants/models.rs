@@ -44,7 +44,6 @@ pub struct Tenant {
 
 #[derive(Debug, Serialize, Deserialize, Validate)]
 pub struct CreateTenantRequest {
-    pub organization_id: String,
     #[validate(custom(function = "validate_not_blank", message = "name is required"))]
     #[validate(length(max = 255, message = "name must be 255 characters or fewer"))]
     pub name: String,
@@ -109,7 +108,6 @@ pub struct ListTenantsQuery {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
     pub status: Option<TenantStatus>,
-    pub organization_id: Option<Uuid>,
     pub tags: Option<HashMap<String, String>>,
 }
 

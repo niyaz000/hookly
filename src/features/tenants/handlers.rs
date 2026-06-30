@@ -95,8 +95,9 @@ pub async fn reactivate_tenant(
 
 pub async fn list_tenants(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     QsQuery(query): QsQuery<ListTenantsQuery>,
 ) -> Result<Json<ListTenantsResponse>, AppError> {
-    let result = service(state).list(query).await?;
+    let result = service(state).list(query, ctx).await?;
     Ok(Json(result))
 }

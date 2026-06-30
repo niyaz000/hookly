@@ -19,7 +19,7 @@ impl EnvironmentService {
         Self { repo }
     }
 
-    #[tracing::instrument(skip(self, req, ctx), fields(tenant_id = %req.tenant_id, name = %req.name))]
+    #[tracing::instrument(skip(self, req, ctx), fields(tenant_id = %ctx.tenant_id, name = %req.name))]
     pub async fn create(
         &self,
         req: CreateEnvironmentRequest,
@@ -28,16 +28,10 @@ impl EnvironmentService {
         info!("creating environment");
         if let Some(t) = &req.tags { validators::validate_tags(t)?; }
 
-        let tenant_id = self
-            .repo
-            .resolve_tenant(&req.tenant_id)
-            .await?
-            .ok_or_else(|| AppError::NotFound(format!("Tenant not found: {}", req.tenant_id)))?;
-
         let tags = serde_json::to_value(req.tags.unwrap_or_default())
             .unwrap_or(serde_json::Value::Object(Default::default()));
 
-        let env = self.repo.create(tenant_id, req.name, req.description, tags, ctx).await?;
+        let env = self.repo.create(ctx.tenant_id, req.name, req.description, tags, ctx).await?;
 
         info!(public_id = %env.public_id, "environment created");
         Ok(env)
@@ -54,7 +48,7 @@ impl EnvironmentService {
             })
     }
 
-    #[tracing::instrument(skip(self, query), fields(tenant_id = ?query.tenant_id))]
+    #[tracing::instrument(skip(self, query), fields(tenant_id = %tenant_id))]
     pub async fn list(
         &self,
         tenant_id: Uuid,

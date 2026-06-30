@@ -67,8 +67,6 @@ pub struct CreateScheduleRequest {
     pub name: String,
     pub description: Option<String>,
     pub application_id: String,
-    pub tenant_id: String,
-    pub organization_id: String,
     #[validate(custom(function = "validate_not_blank", message = "event_type_id is required"))]
     pub event_type_id: String,
     #[validate(length(min = 1, message = "endpoint_ids must contain at least one entry"))]
@@ -109,8 +107,6 @@ impl UpdateScheduleRequest {
 pub struct ListSchedulesQuery {
     pub limit: Option<i64>,
     pub cursor: Option<String>,
-    pub organization_id: Option<String>,
-    pub tenant_id: Option<String>,
     pub status: Option<String>,
     pub tags: Option<std::collections::HashMap<String, String>>,
 }

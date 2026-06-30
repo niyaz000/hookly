@@ -34,16 +34,6 @@ impl EnvironmentRepository {
         Self { pool }
     }
 
-    pub async fn resolve_tenant(&self, public_id: &str) -> Result<Option<Uuid>, AppError> {
-        let id = sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM tenants WHERE public_id = $1 AND deleted_at IS NULL",
-        )
-        .bind(public_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(id)
-    }
-
     pub async fn create(
         &self,
         tenant_id: Uuid,

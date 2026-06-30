@@ -25,15 +25,6 @@ impl ApplicationService {
         info!("creating application");
         validators::validate_tags(&req.tags)?;
 
-        let (tenant_id, organization_id) = self
-            .repo
-            .resolve_tenant_with_org(&req.tenant_id)
-            .await?
-            .ok_or_else(|| {
-                warn!(tenant_id = %req.tenant_id, "tenant not found");
-                AppError::NotFound(format!("Tenant not found: {}", req.tenant_id))
-            })?;
-
         let environment_id = self
             .repo
             .resolve_environment(&req.environment_id)
@@ -43,7 +34,7 @@ impl ApplicationService {
                 AppError::NotFound(format!("Environment not found: {}", req.environment_id))
             })?;
 
-        let application = self.repo.create(req, tenant_id, organization_id, environment_id, ctx).await?;
+        let application = self.repo.create(req, ctx.tenant_id, ctx.organization_id, environment_id, ctx).await?;
         info!(public_id = %application.public_id, "application created");
         Ok(application)
     }

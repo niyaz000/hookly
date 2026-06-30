@@ -48,14 +48,11 @@ pub async fn create_api_key(
 
 pub async fn list_api_keys(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     QsQuery(query): QsQuery<ListApiKeysQuery>,
 ) -> Result<(StatusCode, Json<ListApiKeysResponse>), AppError> {
-    let tenant_id = query
-        .tenant_id
-        .ok_or_else(|| AppError::BadRequest("tenant_id query parameter is required".into()))?;
-
     let svc = make_svc(state);
-    let resp = svc.list(tenant_id, query).await?;
+    let resp = svc.list(ctx.tenant_id, query).await?;
 
     Ok((StatusCode::OK, Json(resp)))
 }

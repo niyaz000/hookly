@@ -48,9 +48,10 @@ pub async fn create_version(
 
 pub async fn list_event_types(
     State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
     QsQuery(params): QsQuery<ListQueryParams>,
 ) -> Result<(StatusCode, Json<PaginatedResponse<EventTypeResponse>>), AppError> {
-    let result = svc(state).list(params).await?;
+    let result = svc(state).list(params, ctx).await?;
     Ok((StatusCode::OK, Json(result)))
 }
 

@@ -28,7 +28,7 @@ impl ApiKeyService {
     }
 
     #[tracing::instrument(skip(self, req, ctx), fields(
-        tenant_id = %req.tenant_id,
+        tenant_id = %ctx.tenant_id,
         user_id = %req.user_id,
         environment_id = %req.environment_id,
         name = %req.name
@@ -48,7 +48,7 @@ impl ApiKeyService {
                 AppError::BadRequest(format!("environment not found: {}", req.environment_id))
             })?;
 
-        if env.tenant_id != req.tenant_id {
+        if env.tenant_id != ctx.tenant_id {
             return Err(AppError::BadRequest("environment does not belong to this tenant".into()));
         }
 
@@ -58,7 +58,7 @@ impl ApiKeyService {
 
         let settings = self
             .repo
-            .get_settings_by_tenant(req.tenant_id)
+            .get_settings_by_tenant(ctx.tenant_id)
             .await?;
 
         let key_length = settings.as_ref().map(|s| s.key_length).unwrap_or(32);
@@ -69,12 +69,12 @@ impl ApiKeyService {
         if let Some(max) = max_keys {
             let count = self
                 .repo
-                .count_active_for_user(req.tenant_id, req.user_id)
+                .count_active_for_user(ctx.tenant_id, req.user_id)
                 .await?;
             if count >= max as i64 {
                 warn!(
                     user_id = %req.user_id,
-                    tenant_id = %req.tenant_id,
+                    tenant_id = %ctx.tenant_id,
                     current_count = count,
                     max_keys = max,
                     "user has reached max api key limit"
@@ -106,8 +106,8 @@ impl ApiKeyService {
         let key = self
             .repo
             .create(
-                req.organization_id,
-                req.tenant_id,
+                ctx.organization_id,
+                ctx.tenant_id,
                 req.user_id,
                 req.name,
                 req.description,
@@ -153,7 +153,7 @@ impl ApiKeyService {
     }
 
     #[tracing::instrument(skip(self, query), fields(
-        tenant_id = ?query.tenant_id,
+        tenant_id = %tenant_id,
         limit = ?query.limit
     ))]
     pub async fn list(
@@ -351,8 +351,8 @@ impl ApiKeyService {
     }
 
     #[tracing::instrument(skip(self, req, ctx), fields(
-        organization_id = %req.organization_id,
-        tenant_id = %req.tenant_id
+        organization_id = %ctx.organization_id,
+        tenant_id = %ctx.tenant_id
     ))]
     pub async fn upsert_settings(
         &self,
@@ -361,7 +361,7 @@ impl ApiKeyService {
     ) -> Result<ApiKeySettings, AppError> {
         info!("upserting api key settings");
 
-        let settings = self.repo.upsert_settings(&req, ctx).await?;
+        let settings = self.repo.upsert_settings(ctx.organization_id, ctx.tenant_id, &req, ctx).await?;
 
         info!(
             public_id = %settings.public_id,

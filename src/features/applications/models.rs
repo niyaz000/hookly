@@ -36,7 +36,6 @@ pub struct Application {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateApplicationRequest {
-    pub tenant_id: String,
     pub environment_id: String,
     pub name: String,
     pub description: String,

@@ -72,7 +72,6 @@ pub struct JwtKey {
 
 #[derive(Debug, Deserialize)]
 pub struct CreateJwtKeyRequest {
-    pub tenant_id: Uuid,
     pub application_id: Option<String>,
     pub name: String,
     pub key_use: JwtKeyUse,
@@ -131,7 +130,6 @@ pub struct RotateJwtKeyRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct ListJwtKeysQuery {
-    pub tenant_id: Option<Uuid>,
     pub application_id: Option<String>,
     pub key_use: Option<JwtKeyUse>,
     pub status: Option<JwtKeyStatus>,

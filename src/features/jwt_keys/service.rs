@@ -24,7 +24,7 @@ impl JwtKeyService {
         Self { repo, crypto }
     }
 
-    #[tracing::instrument(skip(self, req, ctx), fields(tenant_id = %req.tenant_id, name = %req.name))]
+    #[tracing::instrument(skip(self, req, ctx), fields(tenant_id = %ctx.tenant_id, name = %req.name))]
     pub async fn create(
         &self,
         req: CreateJwtKeyRequest,
@@ -37,19 +37,19 @@ impl JwtKeyService {
         let private_key_enc = pair
             .private_key_pem
             .as_ref()
-            .map(|pem| self.crypto.encrypt(req.tenant_id, pem))
+            .map(|pem| self.crypto.encrypt(ctx.tenant_id, pem))
             .transpose()?;
 
         let secret_enc = pair
             .hmac_secret
             .as_ref()
-            .map(|s| self.crypto.encrypt(req.tenant_id, s))
+            .map(|s| self.crypto.encrypt(ctx.tenant_id, s))
             .transpose()?;
 
         let key = self
             .repo
             .create(
-                req.tenant_id,
+                ctx.tenant_id,
                 req.application_id,
                 req.name,
                 req.key_use,
@@ -84,17 +84,18 @@ impl JwtKeyService {
         })
     }
 
-    #[tracing::instrument(skip(self, query))]
+    #[tracing::instrument(skip(self, query, ctx))]
     pub async fn list(
         &self,
         query: ListJwtKeysQuery,
+        ctx: RequestContext,
     ) -> Result<ListJwtKeysResponse, AppError> {
         let limit = query.limit.unwrap_or(20).clamp(1, 100);
 
         let (keys, next_cursor) = self
             .repo
             .list(
-                query.tenant_id,
+                Some(ctx.tenant_id),
                 query.application_id,
                 query.key_use,
                 query.status,
