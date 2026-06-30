@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+
 use uuid::Uuid;
 
 use crate::common::nano_id::NanoId;
@@ -8,11 +8,11 @@ use crate::features::delivery::models::{DeliveryJobRow, UnqueuedJob, WorkerJob};
 
 #[derive(Clone)]
 pub struct DeliveryRepository {
-    db: PgPool,
+    db: crate::common::CountingPool,
 }
 
 impl DeliveryRepository {
-    pub fn new(db: PgPool) -> Self {
+    pub fn new(db: crate::common::CountingPool) -> Self {
         Self { db }
     }
 

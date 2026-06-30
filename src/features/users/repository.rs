@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::{types::Json, PgPool, QueryBuilder};
+use sqlx::{types::Json, QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -37,11 +37,11 @@ const RETURNING_COLS: &str = "
 ";
 
 pub struct UserRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl UserRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

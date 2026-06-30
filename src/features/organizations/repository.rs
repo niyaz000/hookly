@@ -1,5 +1,5 @@
 use chrono::Utc;
-use sqlx::{types::Json, PgPool, QueryBuilder};
+use sqlx::{types::Json, QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -33,11 +33,11 @@ const RETURNING_ORG_COLS: &str = "
 ";
 
 pub struct OrganizationRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl OrganizationRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

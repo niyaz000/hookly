@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use serde::Serialize;
-use sqlx::{types::Json, PgPool};
+use sqlx::{types::Json};
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -30,13 +30,13 @@ pub struct BootstrapResponse {
 }
 
 pub struct BootstrapService {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
     role_repo: RoleRepository,
     perm_repo: PermissionRepository,
 }
 
 impl BootstrapService {
-    pub fn new(pool: PgPool, role_repo: RoleRepository, perm_repo: PermissionRepository) -> Self {
+    pub fn new(pool: crate::common::CountingPool, role_repo: RoleRepository, perm_repo: PermissionRepository) -> Self {
         Self { pool, role_repo, perm_repo }
     }
 

@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+
 use uuid::Uuid;
 
 use crate::common::nano_id::NanoId;
@@ -39,11 +39,11 @@ pub struct EventTypeRef {
 }
 
 pub struct SubscriptionRepository {
-    db: PgPool,
+    db: crate::common::CountingPool,
 }
 
 impl SubscriptionRepository {
-    pub fn new(db: PgPool) -> Self {
+    pub fn new(db: crate::common::CountingPool) -> Self {
         Self { db }
     }
 

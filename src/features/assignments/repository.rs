@@ -1,4 +1,4 @@
-use sqlx::PgPool;
+
 use tracing::debug;
 use uuid::Uuid;
 
@@ -8,11 +8,11 @@ use super::models::{AssignedPermissionRow, AssignedRoleRow, EffectivePermissionR
 
 #[derive(Clone)]
 pub struct AssignmentRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl AssignmentRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

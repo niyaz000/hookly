@@ -6,7 +6,7 @@ use std::str::FromStr;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::{common::{idempotency, types::RequestContext}, error::AppError};
+use crate::{common::{call_counter, idempotency, types::RequestContext}, error::AppError};
 
 use super::{
     models::{
@@ -469,6 +469,7 @@ impl ScheduleService {
         }
 
         // Standard path: pick the lowest-score active shard from the routing sorted set.
+        call_counter::inc_redis();
         let mut conn = self
             .redis
             .get_multiplexed_async_connection()
@@ -499,6 +500,7 @@ impl ScheduleService {
     // logged and swallowed — the reconciliation task corrects drift every 2 min.
 
     async fn zadd_pending(&self, shard: i16, schedule_id: Uuid, next_run_at: DateTime<Utc>) {
+        call_counter::inc_redis();
         let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await else {
             warn!(shard, "redis unavailable; skipping ZADD sched:pending");
             return;
@@ -510,6 +512,7 @@ impl ScheduleService {
     }
 
     async fn zrem_pending(&self, shard: i16, schedule_id: Uuid) {
+        call_counter::inc_redis();
         let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await else {
             warn!(shard, "redis unavailable; skipping ZREM sched:pending");
             return;
@@ -523,6 +526,7 @@ impl ScheduleService {
     // Score = current unix_ms. GT flag means the score only moves forward,
     // protecting against clock skew and ensuring workers see the latest version.
     async fn zadd_shards(&self, shard: i16) {
+        call_counter::inc_redis();
         let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await else {
             warn!(shard, "redis unavailable; skipping ZADD sched:shards");
             return;
@@ -538,6 +542,7 @@ impl ScheduleService {
     }
 
     async fn zincrby_routing(&self, shard: i16, delta: i64) {
+        call_counter::inc_redis();
         let Ok(mut conn) = self.redis.get_multiplexed_async_connection().await else {
             return;
         };

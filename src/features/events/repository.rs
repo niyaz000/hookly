@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use sqlx::{types::Json, PgPool};
+use sqlx::{types::Json};
 use uuid::Uuid;
 
 use crate::common::{nano_id::NanoId, types::RequestContext};
@@ -52,11 +52,11 @@ pub struct EventTypeRef {
 }
 
 pub struct EventRepository {
-    db: PgPool,
+    db: crate::common::CountingPool,
 }
 
 impl EventRepository {
-    pub fn new(db: PgPool) -> Self {
+    pub fn new(db: crate::common::CountingPool) -> Self {
         Self { db }
     }
 

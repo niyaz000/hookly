@@ -1,4 +1,4 @@
-use sqlx::{PgPool, QueryBuilder};
+use sqlx::{QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -17,11 +17,11 @@ const MAX_WEBHOOKS_PER_TENANT: i64 = 10;
 
 #[derive(Clone)]
 pub struct PlatformWebhookRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl PlatformWebhookRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

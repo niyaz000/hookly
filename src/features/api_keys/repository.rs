@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, QueryBuilder};
+use sqlx::{QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -47,11 +47,11 @@ const RETURNING_SETTINGS_COLS: &str = "
 ";
 
 pub struct ApiKeyRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl ApiKeyRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

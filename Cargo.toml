@@ -15,6 +15,8 @@ serde_qs = "0.13"
 
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "migrate", "json"] }
 redis = { version = "0.27", features = ["tokio-comp", "aio"] }
+futures-core = "0.3"
+either = "1"
 reqwest = { version = "0.12", features = ["json"] }
 
 tracing = "0.1"

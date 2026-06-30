@@ -1,4 +1,4 @@
-use sqlx::{PgPool, QueryBuilder};
+use sqlx::{QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -26,11 +26,11 @@ const RETURNING_COLS: &str = "
 
 #[derive(Clone)]
 pub struct EnvironmentRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl EnvironmentRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

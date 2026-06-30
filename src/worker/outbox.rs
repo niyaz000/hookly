@@ -1,6 +1,7 @@
 use tokio::sync::watch;
 use tracing::{info, warn};
 
+use hookly::common::CountingPool;
 use hookly::features::delivery::repository::DeliveryRepository;
 use hookly::queue;
 
@@ -17,7 +18,7 @@ pub async fn run(
     redis: redis::Client,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
-    let delivery_repo = DeliveryRepository::new(db);
+    let delivery_repo = DeliveryRepository::new(CountingPool::from(db));
     let mut interval = tokio::time::interval(config.outbox_interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 

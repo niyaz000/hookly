@@ -1,8 +1,7 @@
-use sqlx::PgPool;
 use tokio::sync::watch;
 use tracing::info;
 
-use hookly::common::TenantCrypto;
+use hookly::common::{CountingPool, TenantCrypto};
 use hookly::features::delivery::repository::DeliveryRepository;
 use hookly::queue;
 
@@ -13,13 +12,13 @@ use crate::consumer;
 /// `reclaim_idle_ms`. Reclaimed messages are processed immediately.
 pub async fn run(
     config: crate::config::WorkerConfig,
-    db: PgPool,
+    db: sqlx::PgPool,
     redis: redis::Client,
     crypto: TenantCrypto,
     http: reqwest::Client,
     mut shutdown_rx: watch::Receiver<bool>,
 ) {
-    let delivery_repo = DeliveryRepository::new(db);
+    let delivery_repo = DeliveryRepository::new(CountingPool::from(db));
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 

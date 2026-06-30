@@ -10,7 +10,7 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::common::types::RequestContext;
+use crate::common::{call_counter, types::RequestContext};
 use crate::error::{AppError, REQUEST_ID};
 use crate::state::AppState;
 
@@ -110,6 +110,7 @@ async fn resolve_api_key(
     let cache_key = format!("auth:{}", key_hash);
 
     // ── Redis cache read ──────────────────────────────────────────────────────
+    call_counter::inc_redis();
     if let Ok(mut conn) = state.redis.get_multiplexed_async_connection().await {
         if let Ok(Some(raw)) = conn.get::<_, Option<String>>(&cache_key).await {
             if let Ok(entry) = serde_json::from_str::<AuthCacheEntry>(&raw) {
@@ -162,6 +163,7 @@ async fn resolve_api_key(
 
     // Write to cache (best-effort — Redis failure is non-fatal)
     if let Ok(json) = serde_json::to_string(&entry) {
+        call_counter::inc_redis();
         if let Ok(mut conn) = state.redis.get_multiplexed_async_connection().await {
             let _: Result<(), _> = conn.set_ex(&cache_key, json, AUTH_CACHE_TTL_SECS).await;
         }
@@ -336,6 +338,7 @@ async fn resolve_jwt(
 async fn load_jwt_key(state: &AppState, kid: &str) -> Result<JwtKeyCacheEntry, AppError> {
     let cache_key = format!("jwt_pk:{}", kid);
 
+    call_counter::inc_redis();
     if let Ok(mut conn) = state.redis.get_multiplexed_async_connection().await {
         if let Ok(Some(raw)) = conn.get::<_, Option<String>>(&cache_key).await {
             if let Ok(entry) = serde_json::from_str::<JwtKeyCacheEntry>(&raw) {
@@ -386,6 +389,7 @@ async fn load_jwt_key(state: &AppState, kid: &str) -> Result<JwtKeyCacheEntry, A
     };
 
     if let Ok(json) = serde_json::to_string(&entry) {
+        call_counter::inc_redis();
         if let Ok(mut conn) = state.redis.get_multiplexed_async_connection().await {
             let _: Result<(), _> = conn
                 .set_ex(&cache_key, json, JWT_KEY_CACHE_TTL_SECS)

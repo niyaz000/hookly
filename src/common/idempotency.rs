@@ -1,6 +1,7 @@
 use sha2::{Digest, Sha256};
 use serde::Serialize;
 
+use crate::common::call_counter;
 use crate::error::AppError;
 
 const LOCK_TTL_MS: u64 = 60_000;
@@ -45,6 +46,7 @@ pub async fn acquire_lock(
     let lock_key = format!("idmp_lock:{}:{}", namespace, key);
     let lock_token = uuid::Uuid::new_v4().to_string();
 
+    call_counter::inc_redis();
     let mut conn = redis
         .get_multiplexed_async_connection()
         .await
@@ -81,6 +83,7 @@ pub async fn release_lock(redis: &redis::Client, namespace: &str, key: &str, tok
             return 0
         end
     "#;
+    call_counter::inc_redis();
     if let Ok(mut conn) = redis.get_multiplexed_async_connection().await {
         let _: i64 = redis::Script::new(script)
             .key(&lock_key)

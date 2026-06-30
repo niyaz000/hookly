@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::{types::Json, PgPool, QueryBuilder};
+use sqlx::{types::Json, QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -18,11 +18,11 @@ const INVITE_SELECT: &str = r#"
 "#;
 
 pub struct InviteRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl InviteRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

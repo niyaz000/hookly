@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use tokio::sync::{watch, Semaphore};
 use tracing::{error, info, warn};
 
-use hookly::common::TenantCrypto;
+use hookly::common::{CountingPool, TenantCrypto};
 use hookly::features::delivery::repository::DeliveryRepository;
 use hookly::queue;
 
@@ -44,7 +44,7 @@ pub async fn run(
     shutdown_rx: watch::Receiver<bool>,
 ) {
     let consumer_name = format!("{}-w{}", config.consumer_name, worker_id);
-    let delivery_repo = DeliveryRepository::new(db);
+    let delivery_repo = DeliveryRepository::new(CountingPool::from(db));
     info!(worker_id, consumer = %consumer_name, "consumer started");
 
     loop {

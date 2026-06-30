@@ -1,4 +1,4 @@
-use sqlx::{PgPool, QueryBuilder};
+use sqlx::{QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -14,11 +14,11 @@ const SELECT_COLS: &str = "
 
 #[derive(Clone)]
 pub struct PermissionRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl PermissionRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

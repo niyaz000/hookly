@@ -1,4 +1,4 @@
-use sqlx::{types::Json, PgPool, QueryBuilder};
+use sqlx::{types::Json, QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -10,11 +10,11 @@ use crate::{
 use super::models::{CreateTeamRequest, Team, TeamMember, UpdateTeamRequest};
 
 pub struct TeamRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl TeamRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

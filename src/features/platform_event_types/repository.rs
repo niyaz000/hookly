@@ -1,4 +1,4 @@
-use sqlx::{PgPool, QueryBuilder};
+use sqlx::{QueryBuilder};
 use tracing::debug;
 
 use crate::error::AppError;
@@ -9,11 +9,11 @@ const SELECT_COLS: &str = "id, public_id, name, description, resource, action, c
 
 #[derive(Clone)]
 pub struct PlatformEventTypeRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl PlatformEventTypeRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

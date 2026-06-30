@@ -1,6 +1,6 @@
 use chrono::Utc;
 use sqlx::types::Json;
-use sqlx::PgPool;
+
 use tracing::debug;
 use uuid::Uuid;
 
@@ -30,11 +30,11 @@ const GET_JOINED: &str = r#"
 "#;
 
 pub struct ApplicationRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl ApplicationRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

@@ -8,7 +8,7 @@ use axum::{
 use chrono::Utc;
 use tracing::info;
 
-use crate::common::HandlerName;
+use crate::common::{call_counter, HandlerName};
 use crate::error::REQUEST_ID;
 
 const HEADER_MAX_BYTES: usize = 64;
@@ -50,6 +50,7 @@ pub async fn access_log(req: Request, next: Next) -> Response {
 
     let response = next.run(req).await;
 
+    let (db_calls, redis_calls) = call_counter::counts();
     let response_duration_ms = start.elapsed().as_millis() as u64;
     let end_wall = Utc::now();
     let status_code = response.status().as_u16();
@@ -85,6 +86,8 @@ pub async fn access_log(req: Request, next: Next) -> Response {
         bytes_sent = ?bytes_sent,
         error_kind = ?error_kind,
         connection_status = ?connection_status,
+        db_calls,
+        redis_calls,
         "request completed"
     );
 

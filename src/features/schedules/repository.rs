@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use sqlx::{types::Json, PgPool, QueryBuilder};
+use sqlx::{types::Json, QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -31,11 +31,11 @@ const SCHEDULE_SELECT: &str = r#"
 const SCHEDULE_GROUP_BY: &str = "GROUP BY s.id, et.public_id";
 
 pub struct ScheduleRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl ScheduleRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

@@ -1,4 +1,4 @@
-use sqlx::PgPool;
+
 use tracing::debug;
 use uuid::Uuid;
 
@@ -10,11 +10,11 @@ const SELECT_COLS: &str = "tenant_id, event_type_public_id, created_at";
 
 #[derive(Clone)]
 pub struct PlatformSubscriptionRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl PlatformSubscriptionRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 

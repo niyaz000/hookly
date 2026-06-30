@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use sqlx::{types::Json, PgPool, QueryBuilder};
+use sqlx::{types::Json, QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
@@ -12,11 +12,11 @@ use crate::{
 use super::models::{CreateTenantRequest, Tenant, TenantStatus, UpdateTenantRequest};
 
 pub struct TenantRepository {
-    pool: PgPool,
+    pool: crate::common::CountingPool,
 }
 
 impl TenantRepository {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: crate::common::CountingPool) -> Self {
         Self { pool }
     }
 
