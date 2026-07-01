@@ -5,8 +5,6 @@ services:
       POSTGRES_USER: hookly
       POSTGRES_PASSWORD: hookly
       POSTGRES_DB: hookly
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hookly"]
       interval: 5s
@@ -15,28 +13,55 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 10
 
+  envoy:
+    image: envoyproxy/envoy:v1.32-latest
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    ports:
+      - "9901:9901"   # admin UI + Prometheus metrics + fault injection API
+    command: envoy -c /etc/envoy/envoy.yaml --log-level warn
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9901/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Zipkin collects traces from Envoy's http_egress listener.
+  # UI: http://localhost:9411
+  zipkin:
+    image: openzipkin/zipkin:latest
+    ports:
+      - "9411:9411"
+
   migrate:
     image: hookly
     build: .
     command: sqlx migrate run
     environment: &env
-      DATABASE_URL: postgres://hookly:hookly@postgres:5432/hookly
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://hookly:hookly@envoy:5432/hookly
+      REDIS_URL: redis://envoy:6379
+      # Route external HTTP(S) calls through Envoy for telemetry + fault injection.
+      # reqwest reads these automatically — no code changes needed.
+      HTTP_PROXY: http://envoy:3128
+      HTTPS_PROXY: http://envoy:3128
       SERVER_HOST: 0.0.0.0
       SERVER_PORT: "3000"
       CRYPTO_MASTER_KEY: ${CRYPTO_MASTER_KEY}
       CRYPTO_API_KEY_ENCRYPTION_KEY: ${CRYPTO_API_KEY_ENCRYPTION_KEY}
       RUST_LOG: info
     depends_on:
-      postgres:
+      envoy:
         condition: service_healthy
 
   api:
@@ -49,8 +74,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
 
   worker:
     image: hookly
@@ -60,8 +83,6 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy
 
   scheduler:
     image: hookly
@@ -71,5 +92,3 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-      redis:
-        condition: service_healthy

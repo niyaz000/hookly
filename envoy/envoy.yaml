@@ -1,0 +1,236 @@
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901
+
+static_resources:
+  listeners:
+
+    # ─── PostgreSQL egress ────────────────────────────────────────────────────
+    # App connects to envoy:5432. The postgres_proxy filter parses the Postgres
+    # wire protocol and emits per-session/query stats:
+    #   http://localhost:9901/stats?filter=postgres
+    #   http://localhost:9901/stats/prometheus  (egress_postgres.* labels)
+    # tcp_proxy then forwards the raw bytes to the real postgres service.
+    - name: postgres_egress
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 5432
+      filter_chains:
+        - filters:
+            # ── Fault injection (TCP-level, disabled by default) ──────────────
+            # Uncomment to inject a 500ms delay on 25% of new connections:
+            #
+            # - name: envoy.filters.network.fault
+            #   typed_config:
+            #     "@type": type.googleapis.com/envoy.extensions.filters.network.fault.v3.FaultDelay
+            #     fixed_delay: 0.500s
+            #     percentage:
+            #       numerator: 25
+            #       denominator: HUNDRED
+
+            - name: envoy.filters.network.postgres_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.postgres_proxy.v3alpha.PostgresProxy
+                stat_prefix: egress_postgres
+                enable_sql_parsing: true
+
+            - name: envoy.filters.network.tcp_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3
+                stat_prefix: tcp_postgres
+                cluster: postgres_upstream
+                access_log:
+                  - name: envoy.access_loggers.stream
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        text_format_source:
+                          inline_string: "[pg] %START_TIME% rx=%BYTES_RECEIVED%B tx=%BYTES_SENT%B dur=%DURATION%ms\n"
+
+    # ─── Redis egress ─────────────────────────────────────────────────────────
+    # App connects to envoy:6379. The redis_proxy filter understands the Redis
+    # RESP protocol and emits per-command stats:
+    #   http://localhost:9901/stats?filter=redis
+    # redis_proxy is terminal — no tcp_proxy needed after it.
+    - name: redis_egress
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 6379
+      filter_chains:
+        - filters:
+            # ── Fault injection (TCP-level, disabled by default) ──────────────
+            # Uncomment to delay 50% of new Redis connections by 200ms:
+            #
+            # - name: envoy.filters.network.fault
+            #   typed_config:
+            #     "@type": type.googleapis.com/envoy.extensions.filters.network.fault.v3.FaultDelay
+            #     fixed_delay: 0.200s
+            #     percentage:
+            #       numerator: 50
+            #       denominator: HUNDRED
+
+            - name: envoy.filters.network.redis_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.redis_proxy.v3.RedisProxy
+                stat_prefix: egress_redis
+                settings:
+                  # 30s to cover any Lua scripts or slow operations; XREADGROUP
+                  # calls are non-blocking so this headroom is safe.
+                  op_timeout: 30s
+                  enable_command_stats: true
+                  read_policy: PREFER_PRIMARY
+                prefix_routes:
+                  catch_all_route:
+                    cluster: redis_upstream
+
+    # ─── HTTP egress forward proxy ────────────────────────────────────────────
+    # Webhook deliveries and any other external HTTP(S) calls route through here
+    # when HTTP_PROXY=http://envoy:3128 / HTTPS_PROXY=http://envoy:3128 are set.
+    # reqwest respects these env vars automatically.
+    #
+    # Stats:   http://localhost:9901/stats?filter=egress_http
+    # Traces:  http://localhost:9411 (Zipkin UI)
+    #
+    # ── HTTP-level fault injection (runtime-toggleable, no restart needed) ────
+    # Abort 10% of requests with 503:
+    #   curl -X POST http://localhost:9901/runtime_modify \
+    #     -d 'fault.http.abort.abort_percent=10&fault.http.abort.http_status=503'
+    #
+    # Add a 2s delay to 20% of requests:
+    #   curl -X POST http://localhost:9901/runtime_modify \
+    #     -d 'fault.http.delay.fixed_delay_percent=20&fault.http.delay.fixed_duration_ms=2000'
+    #
+    # Clear faults:
+    #   curl -X POST http://localhost:9901/runtime_modify \
+    #     -d 'fault.http.abort.abort_percent=0&fault.http.delay.fixed_delay_percent=0'
+    - name: http_egress
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 3128
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: egress_http
+                codec_type: AUTO
+                http_filters:
+                  # Fault injection. No static faults defined — use runtime_modify
+                  # API above to inject faults on-the-fly during testing.
+                  - name: envoy.filters.http.fault
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.fault.v3.HTTPFault
+                      # Static fault examples (uncomment to bake in at startup):
+                      # abort:
+                      #   http_status: 503
+                      #   percentage: { numerator: 10, denominator: HUNDRED }
+                      # delay:
+                      #   fixed_delay: 2s
+                      #   percentage: { numerator: 20, denominator: HUNDRED }
+
+                  - name: envoy.filters.http.dynamic_forward_proxy
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_forward_proxy.v3.FilterConfig
+                      dns_cache_config:
+                        name: dfp_cache
+                        dns_lookup_family: V4_PREFERRED
+
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+                route_config:
+                  virtual_hosts:
+                    - name: egress_passthrough
+                      domains: ["*"]
+                      routes:
+                        # HTTPS tunneling: reqwest sends CONNECT host:443, Envoy
+                        # tunnels the TLS handshake transparently.
+                        - match: { connect_matcher: {} }
+                          route:
+                            cluster: dynamic_forward_proxy_cluster
+                            upgrade_configs:
+                              - upgrade_type: CONNECT
+                                connect_config: {}
+                        # Plain HTTP
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: dynamic_forward_proxy_cluster
+                            timeout: 30s
+
+                tracing:
+                  provider:
+                    name: envoy.tracers.zipkin
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.config.trace.v3.ZipkinConfig
+                      collector_cluster: zipkin
+                      collector_endpoint: /api/v2/spans
+                      collector_endpoint_version: HTTP_JSON
+                      shared_span_context: true
+
+                access_log:
+                  - name: envoy.access_loggers.stream
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        text_format_source:
+                          inline_string: "[http-egress] %START_TIME% %REQ(:METHOD)% %REQ(:AUTHORITY)%%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)% %RESPONSE_CODE% %BYTES_SENT%B %DURATION%ms\n"
+
+  clusters:
+    # ── Upstream targets ───────────────────────────────────────────────────────
+    - name: postgres_upstream
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: postgres_upstream
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: postgres
+                      port_value: 5432
+
+    - name: redis_upstream
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: redis_upstream
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: redis
+                      port_value: 6379
+
+    # ── Dynamic forward proxy for external HTTP(S) ────────────────────────────
+    # Resolves the target host from the request's Host header on each request.
+    - name: dynamic_forward_proxy_cluster
+      lb_policy: CLUSTER_PROVIDED
+      cluster_type:
+        name: envoy.clusters.dynamic_forward_proxy
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.clusters.dynamic_forward_proxy.v3.ClusterConfig
+          dns_cache_config:
+            name: dfp_cache
+            dns_lookup_family: V4_PREFERRED
+
+    # ── Zipkin trace collector ─────────────────────────────────────────────────
+    - name: zipkin
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: zipkin
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: zipkin
+                      port_value: 9411
