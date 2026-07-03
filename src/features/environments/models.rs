@@ -143,3 +143,9 @@ pub struct ListEnvironmentsResponse {
     pub next_cursor: Option<String>,
     pub limit: i64,
 }
+
+impl Environment {
+    pub fn new_public_id() -> String {
+        format!("env_{}", crate::common::NanoId::new())
+    }
+}

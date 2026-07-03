@@ -5,7 +5,6 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::common::types::RequestContext;
-use crate::common::NanoId;
 use crate::error::AppError;
 use crate::features::applications::models::{
     Application, CreateApplicationRequest, GetApplicationResponse,
@@ -57,7 +56,7 @@ impl ApplicationRepository {
         ctx: RequestContext,
     ) -> Result<Application, AppError> {
         let id = Uuid::new_v4();
-        let public_id = format!("app_{}", NanoId::new());
+        let public_id = Application::new_public_id();
         let now = Utc::now();
 
         debug!(public_id = %public_id, "inserting application");

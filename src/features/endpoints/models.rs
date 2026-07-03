@@ -191,3 +191,15 @@ mod double_option {
         Ok(Some(Option::deserialize(d)?))
     }
 }
+
+impl EndpointRow {
+    pub fn new_public_id() -> String {
+        format!("ep_{}", crate::common::NanoId::new())
+    }
+}
+
+impl SecretRow {
+    pub fn new_public_id() -> String {
+        format!("sec_{}", crate::common::NanoId::new())
+    }
+}

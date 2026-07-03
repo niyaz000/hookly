@@ -207,3 +207,15 @@ pub struct ListInvitesResponse {
     pub next_cursor: Option<String>,
     pub limit: i64,
 }
+
+impl InviteRow {
+    pub fn new_public_id() -> String {
+        format!("inv_{}", crate::common::NanoId::new())
+    }
+}
+
+impl TenantMemberRow {
+    pub fn new_public_id() -> String {
+        format!("mem_{}", crate::common::NanoId::new())
+    }
+}

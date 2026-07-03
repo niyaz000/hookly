@@ -3,7 +3,7 @@ use sqlx::{types::Json, QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::{common::{types::RequestContext, NanoId}, error::AppError};
+use crate::{common::types::RequestContext, error::AppError};
 
 use super::models::{ScheduleExecutionRow, ScheduleRow, UpdateScheduleRequest};
 
@@ -177,7 +177,7 @@ impl ScheduleRepository {
         ctx: RequestContext,
     ) -> Result<ScheduleRow, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("sch_{}", NanoId::generate(20));
+        let public_id = ScheduleRow::new_public_id();
 
         debug!(public_id = %public_id, "inserting schedule");
 
@@ -475,7 +475,7 @@ impl ScheduleRepository {
         triggered_at: DateTime<Utc>,
     ) -> Result<ScheduleExecutionRow, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("sxe_{}", NanoId::generate(20));
+        let public_id = ScheduleExecutionRow::new_public_id();
 
         debug!(public_id = %public_id, "inserting schedule execution");
 

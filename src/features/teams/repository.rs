@@ -3,7 +3,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    common::{types::RequestContext, NanoId},
+    common::types::RequestContext,
     error::AppError,
 };
 
@@ -74,7 +74,7 @@ impl TeamRepository {
         ctx: RequestContext,
     ) -> Result<Team, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("tea_{}", NanoId::generate(20));
+        let public_id = Team::new_public_id();
 
         debug!(public_id = %public_id, "inserting team");
 
@@ -261,7 +261,7 @@ impl TeamRepository {
         let mut members = Vec::with_capacity(user_ids.len());
         for user_id in user_ids {
             let id = Uuid::now_v7();
-            let public_id = format!("mem_{}", NanoId::generate(20));
+            let public_id = TeamMember::new_public_id();
 
             let member = sqlx::query_as::<_, TeamMember>(
                 r#"

@@ -180,3 +180,9 @@ impl From<EventRow> for EventResponse {
         }
     }
 }
+
+impl EventRow {
+    pub fn new_public_id() -> String {
+        format!("evn_{}", crate::common::NanoId::new())
+    }
+}

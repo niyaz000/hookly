@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 
 use uuid::Uuid;
 
-use crate::common::nano_id::NanoId;
 use crate::error::AppError;
 
 use super::models::{ListQueryParams, SubscriptionRow};
@@ -98,7 +97,7 @@ impl SubscriptionRepository {
         endpoint_id: Uuid,
         event_type_id: Uuid,
     ) -> Result<SubscriptionRow, AppError> {
-        let public_id = format!("sub_{}", NanoId::new());
+        let public_id = SubscriptionRow::new_public_id();
 
         sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO subscriptions

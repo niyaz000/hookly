@@ -158,3 +158,9 @@ pub struct ListUsersResponse {
     pub next_cursor: Option<String>,
     pub limit: i64,
 }
+
+impl User {
+    pub fn new_public_id() -> String {
+        format!("usr_{}", crate::common::NanoId::new())
+    }
+}

@@ -173,3 +173,9 @@ pub struct ListPlatformWebhooksResponse {
     pub next_cursor: Option<String>,
     pub limit: i64,
 }
+
+impl PlatformWebhook {
+    pub fn new_public_id() -> String {
+        format!("pwh_{}", crate::common::NanoId::new())
+    }
+}

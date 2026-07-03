@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{types::Json};
 use uuid::Uuid;
 
-use crate::common::{nano_id::NanoId, types::RequestContext};
+use crate::common::types::RequestContext;
 use crate::error::AppError;
 use crate::features::endpoints::models::{
     EndpointRow, ListQueryParams, SecretRow, UpdateEndpointRequest,
@@ -102,8 +102,8 @@ impl EndpointRepository {
         encrypted_secret: &str,
         ctx: RequestContext,
     ) -> Result<EndpointRow, AppError> {
-        let ep_public_id = format!("ep_{}", NanoId::new());
-        let sec_public_id = format!("sec_{}", NanoId::new());
+        let ep_public_id = EndpointRow::new_public_id();
+        let sec_public_id = SecretRow::new_public_id();
 
         let mut tx = self.db.begin().await?;
 
@@ -439,7 +439,7 @@ impl EndpointRepository {
         .execute(&mut *tx)
         .await?;
 
-        let sec_public_id = format!("sec_{}", NanoId::new());
+        let sec_public_id = SecretRow::new_public_id();
         let secret: SecretRow = sqlx::query_as(
             r#"INSERT INTO endpoint_secrets
                (public_id, endpoint_id, tenant_id, organization_id,

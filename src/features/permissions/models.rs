@@ -146,3 +146,9 @@ pub struct ListPermissionsResponse {
     pub next_cursor: Option<String>,
     pub limit: i64,
 }
+
+impl Permission {
+    pub fn new_public_id() -> String {
+        format!("per_{}", crate::common::NanoId::new())
+    }
+}

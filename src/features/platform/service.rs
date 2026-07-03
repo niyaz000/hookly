@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
 use serde::Serialize;
-use sqlx::{types::Json};
+use sqlx::types::Json;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::common::{types::RequestContext, NanoId};
+use crate::common::types::RequestContext;
 use crate::error::AppError;
 use crate::features::{
     api_keys::{
@@ -36,13 +36,18 @@ pub struct BootstrapService {
 }
 
 impl BootstrapService {
-    pub fn new(pool: crate::common::CountingPool, role_repo: RoleRepository, perm_repo: PermissionRepository) -> Self {
-        Self { pool, role_repo, perm_repo }
+    pub fn new(
+        pool: crate::common::CountingPool,
+        role_repo: RoleRepository,
+        perm_repo: PermissionRepository,
+    ) -> Self {
+        Self {
+            pool,
+            role_repo,
+            perm_repo,
+        }
     }
 
-    /// Create an org and its required bootstrap resources in a single transaction:
-    /// default tenant → production environment → owner user → default API key.
-    /// Role seeding runs after the commit (best-effort, same as normal tenant creation).
     #[tracing::instrument(skip(self, req, ctx), fields(slug = %req.slug))]
     pub async fn bootstrap_organization(
         &self,
@@ -55,11 +60,11 @@ impl BootstrapService {
 
         // Pre-generate the owner user ID so it can be used as created_by for all resources.
         let user_id = Uuid::now_v7();
-        let user_public_id = format!("usr_{}", NanoId::generate(20));
+        let user_public_id = User::new_public_id();
 
         // ── 1. Organization ───────────────────────────────────────────────────
         let org_id = Uuid::now_v7();
-        let org_public_id = format!("org_{}", NanoId::generate(20));
+        let org_public_id = Organization::new_public_id();
 
         let org = sqlx::query_as::<_, Organization>(
             r#"
@@ -91,7 +96,7 @@ impl BootstrapService {
 
         // ── 2. Default tenant ─────────────────────────────────────────────────
         let tenant_id = Uuid::now_v7();
-        let tenant_public_id = format!("ten_{}", NanoId::generate(20));
+        let tenant_public_id = Tenant::new_public_id();
         let tenant_name = format!("{} Default", req.name.trim());
         let tenant_description = "Default tenant created on organization signup.";
         let empty_map = Json(HashMap::<String, String>::new());
@@ -130,7 +135,7 @@ impl BootstrapService {
         .await?;
 
         // ── 3. Default environment (production) ───────────────────────────────
-        let env_public_id = format!("env_{}", NanoId::new());
+        let env_public_id = Environment::new_public_id();
 
         let env = sqlx::query_as::<_, Environment>(
             r#"
@@ -186,7 +191,7 @@ impl BootstrapService {
         // ── 5. Default API key ────────────────────────────────────────────────
         let (full_key, key_prefix) = crypto::generate_api_key("production", 32);
         let key_hash = crypto::hash_key(&full_key);
-        let api_key_public_id = format!("key_{}", NanoId::new());
+        let api_key_public_id = ApiKey::new_public_id();
 
         let api_key = sqlx::query_as::<_, ApiKey>(
             r#"
@@ -231,7 +236,9 @@ impl BootstrapService {
         // ── Phase 2: best-effort role seeding (same pattern as TenantService) ─
         let seed_result = async {
             let system_perms = self.perm_repo.list_system().await?;
-            self.role_repo.seed_default_roles(tenant_id, &system_perms, ctx).await
+            self.role_repo
+                .seed_default_roles(tenant_id, &system_perms, ctx)
+                .await
         }
         .await;
         if let Err(e) = seed_result {

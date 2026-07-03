@@ -144,3 +144,9 @@ pub struct ListOrganizationsResponse {
     pub next_cursor: Option<String>,
     pub limit: i64,
 }
+
+impl Organization {
+    pub fn new_public_id() -> String {
+        format!("org_{}", crate::common::NanoId::new())
+    }
+}

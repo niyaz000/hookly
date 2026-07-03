@@ -111,3 +111,9 @@ impl From<Application> for GetApplicationResponse {
         }
     }
 }
+
+impl Application {
+    pub fn new_public_id() -> String {
+        format!("app_{}", crate::common::NanoId::new())
+    }
+}

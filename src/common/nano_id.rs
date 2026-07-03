@@ -44,12 +44,32 @@ impl Default for NanoId {
 impl NanoId {
     pub const LENGTH: usize = LEN;
 
+    /// Generates a 16-char time-ordered ID: 8 chars of base-62 encoded
+    /// millisecond timestamp followed by 8 chars of CSPRNG randomness.
+    /// The timestamp prefix keeps B-tree index inserts sequential while
+    /// the random suffix provides 62^8 ≈ 218 trillion combinations per ms —
+    /// collision-safe at up to 10 000 inserts/sec (≤10 per ms).
     pub fn new() -> Self {
-        Self(nanoid::nanoid!(LEN, &ALPHANUMERIC))
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let ts = Self::encode_ts(ms);
+        let rand = Self::generate(8);
+        Self(format!("{ts}{rand}"))
     }
 
     pub fn generate(len: usize) -> String {
         nanoid::nanoid!(len, &ALPHANUMERIC)
+    }
+
+    fn encode_ts(mut ms: u64) -> String {
+        let mut buf = ['0'; 8];
+        for i in (0..8).rev() {
+            buf[i] = ALPHANUMERIC[(ms % 62) as usize];
+            ms /= 62;
+        }
+        buf.iter().collect()
     }
 
     pub fn into_inner(self) -> String {

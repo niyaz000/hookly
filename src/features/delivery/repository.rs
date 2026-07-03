@@ -2,7 +2,6 @@ use chrono::{DateTime, Utc};
 
 use uuid::Uuid;
 
-use crate::common::nano_id::NanoId;
 use crate::error::AppError;
 use crate::features::delivery::models::{DeliveryJobRow, UnqueuedJob, WorkerJob};
 
@@ -37,7 +36,7 @@ impl DeliveryRepository {
         organization_id: Uuid,
         stream_name: &str,
     ) -> Result<DeliveryJobRow, AppError> {
-        let public_id = format!("dj_{}", NanoId::new());
+        let public_id = DeliveryJobRow::new_public_id();
         sqlx::query_as::<_, DeliveryJobRow>(
             r#"INSERT INTO delivery_jobs
                (public_id, event_id, endpoint_id, organization_id, stream_name)

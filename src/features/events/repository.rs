@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use sqlx::{types::Json};
 use uuid::Uuid;
 
-use crate::common::{nano_id::NanoId, types::RequestContext};
+use crate::common::types::RequestContext;
 use crate::error::AppError;
 use crate::features::events::models::{EventRow, ListQueryParams};
 
@@ -118,7 +118,7 @@ impl EventRepository {
         schema_errors: &[crate::features::events::models::SchemaError],
         ctx: RequestContext,
     ) -> Result<EventRow, AppError> {
-        let public_id = format!("evn_{}", NanoId::new());
+        let public_id = EventRow::new_public_id();
 
         sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO events

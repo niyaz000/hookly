@@ -3,7 +3,7 @@ use sqlx::{types::Json, QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::{common::NanoId, error::AppError};
+use crate::error::AppError;
 
 use super::models::{InviteRow, TenantMemberRow};
 
@@ -61,7 +61,7 @@ impl InviteRepository {
         request_id: Uuid,
     ) -> Result<InviteRow, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("inv_{}", NanoId::generate(20));
+        let public_id = InviteRow::new_public_id();
 
         debug!(public_id = %public_id, "inserting invite");
 
@@ -220,7 +220,7 @@ impl InviteRepository {
         };
 
         let new_id = Uuid::now_v7();
-        let new_public_id = format!("inv_{}", NanoId::generate(20));
+        let new_public_id = InviteRow::new_public_id();
 
         sqlx::query(
             r#"
@@ -317,7 +317,7 @@ impl InviteRepository {
         role: &str,
     ) -> Result<TenantMemberRow, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("mem_{}", NanoId::generate(20));
+        let public_id = TenantMemberRow::new_public_id();
 
         debug!(public_id = %public_id, "inserting tenant member");
 

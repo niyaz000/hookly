@@ -117,3 +117,9 @@ pub struct ListTenantsResponse {
     pub next_cursor: Option<String>,
     pub limit: i64,
 }
+
+impl Tenant {
+    pub fn new_public_id() -> String {
+        format!("ten_{}", crate::common::NanoId::new())
+    }
+}

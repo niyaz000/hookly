@@ -68,3 +68,9 @@ impl From<SubscriptionRow> for SubscriptionResponse {
         }
     }
 }
+
+impl SubscriptionRow {
+    pub fn new_public_id() -> String {
+        format!("sub_{}", crate::common::NanoId::new())
+    }
+}

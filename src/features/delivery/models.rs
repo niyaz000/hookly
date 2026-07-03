@@ -80,3 +80,9 @@ pub struct UnqueuedJob {
     pub public_id: String,
     pub stream_name: String,
 }
+
+impl DeliveryJobRow {
+    pub fn new_public_id() -> String {
+        format!("dj_{}", crate::common::NanoId::new())
+    }
+}

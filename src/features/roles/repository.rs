@@ -2,7 +2,7 @@ use sqlx::{QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::common::{types::RequestContext, NanoId};
+use crate::common::types::RequestContext;
 use crate::error::AppError;
 use crate::features::permissions::models::Permission;
 
@@ -32,7 +32,7 @@ impl RoleRepository {
         ctx: RequestContext,
     ) -> Result<Role, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("rol_{}", NanoId::new());
+        let public_id = Role::new_public_id();
 
         debug!(public_id = %public_id, tenant_id = %tenant_id, name = %name, "inserting role");
 

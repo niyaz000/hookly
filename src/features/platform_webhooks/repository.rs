@@ -2,7 +2,7 @@ use sqlx::{QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::common::{NanoId, types::RequestContext};
+use crate::common::types::RequestContext;
 use crate::error::AppError;
 
 use super::models::{PlatformWebhook, PlatformWebhookStatus};
@@ -47,7 +47,7 @@ impl PlatformWebhookRepository {
         ctx: RequestContext,
     ) -> Result<PlatformWebhook, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("pwh_{}", NanoId::new());
+        let public_id = PlatformWebhook::new_public_id();
 
         debug!(public_id = %public_id, tenant_id = %tenant_id, "inserting platform webhook");
 

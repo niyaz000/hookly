@@ -4,7 +4,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    common::{types::RequestContext, NanoId},
+    common::types::RequestContext,
     error::AppError,
 };
 
@@ -73,7 +73,7 @@ impl UserRepository {
         ctx: RequestContext,
     ) -> Result<User, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("usr_{}", NanoId::generate(20));
+        let public_id = User::new_public_id();
 
         debug!(public_id = %public_id, "inserting user");
 

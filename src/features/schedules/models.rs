@@ -212,3 +212,15 @@ pub struct ListExecutionsResponse {
     pub next_cursor: Option<String>,
     pub limit: i64,
 }
+
+impl ScheduleRow {
+    pub fn new_public_id() -> String {
+        format!("sch_{}", crate::common::NanoId::new())
+    }
+}
+
+impl ScheduleExecutionRow {
+    pub fn new_public_id() -> String {
+        format!("sxe_{}", crate::common::NanoId::new())
+    }
+}

@@ -217,3 +217,9 @@ pub struct GenerateKeyPairResponse {
 pub struct JwksResponse {
     pub keys: Vec<serde_json::Value>,
 }
+
+impl JwtKey {
+    pub fn new_public_id() -> String {
+        format!("jwk_{}", crate::common::NanoId::new())
+    }
+}

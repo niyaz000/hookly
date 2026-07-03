@@ -177,3 +177,15 @@ pub struct ListTeamsResponse {
     pub next_cursor: Option<String>,
     pub limit: i64,
 }
+
+impl Team {
+    pub fn new_public_id() -> String {
+        format!("tea_{}", crate::common::NanoId::new())
+    }
+}
+
+impl TeamMember {
+    pub fn new_public_id() -> String {
+        format!("mem_{}", crate::common::NanoId::new())
+    }
+}

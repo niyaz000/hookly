@@ -2,7 +2,6 @@ use sqlx::{QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::common::NanoId;
 use crate::error::AppError;
 
 use super::models::{Permission, PermissionType};
@@ -31,7 +30,7 @@ impl PermissionRepository {
         action: String,
     ) -> Result<Permission, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("per_{}", NanoId::new());
+        let public_id = Permission::new_public_id();
 
         debug!(public_id = %public_id, tenant_id = %tenant_id, name = %name, "inserting permission");
 

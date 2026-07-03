@@ -5,7 +5,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    common::{types::RequestContext, NanoId},
+    common::types::RequestContext,
     error::AppError,
 };
 
@@ -27,7 +27,7 @@ impl TenantRepository {
         ctx: RequestContext,
     ) -> Result<Tenant, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("ten_{}", NanoId::generate(20));
+        let public_id = Tenant::new_public_id();
 
         debug!(public_id = %public_id, organization_id = %organization_id, "inserting tenant");
 

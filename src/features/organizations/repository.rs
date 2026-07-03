@@ -4,7 +4,7 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::{
-    common::{types::RequestContext, NanoId},
+    common::types::RequestContext,
     error::AppError,
 };
 
@@ -47,7 +47,7 @@ impl OrganizationRepository {
         ctx: RequestContext,
     ) -> Result<Organization, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("org_{}", NanoId::generate(20));
+        let public_id = Organization::new_public_id();
         let now = Utc::now();
 
         let org = sqlx::query_as::<_, Organization>(&format!(

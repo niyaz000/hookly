@@ -139,3 +139,9 @@ pub struct ListRolePermissionsResponse {
     pub role_id: String,
     pub items: Vec<RolePermissionRow>,
 }
+
+impl Role {
+    pub fn new_public_id() -> String {
+        format!("rol_{}", crate::common::NanoId::new())
+    }
+}

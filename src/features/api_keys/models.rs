@@ -360,3 +360,15 @@ impl From<ApiKeySettings> for ApiKeySettingsResponse {
         }
     }
 }
+
+impl ApiKey {
+    pub fn new_public_id() -> String {
+        format!("key_{}", crate::common::NanoId::new())
+    }
+}
+
+impl ApiKeySettings {
+    pub fn new_public_id() -> String {
+        format!("aks_{}", crate::common::NanoId::new())
+    }
+}

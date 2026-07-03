@@ -259,3 +259,9 @@ impl From<EventType> for EventTypeSchemaResponse {
         }
     }
 }
+
+impl EventType {
+    pub fn new_public_id() -> String {
+        format!("evt_{}", crate::common::NanoId::new())
+    }
+}

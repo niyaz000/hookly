@@ -4,7 +4,6 @@ use tracing::debug;
 use uuid::Uuid;
 
 use crate::common::types::RequestContext;
-use crate::common::NanoId;
 use crate::error::AppError;
 use crate::features::event_types::models::{EventType, ListQueryParams};
 
@@ -68,7 +67,7 @@ impl EventTypeRepository {
         ctx: RequestContext,
     ) -> Result<EventType, AppError> {
         let id = Uuid::new_v4();
-        let public_id = format!("evt_{}", NanoId::new());
+        let public_id = EventType::new_public_id();
         let schema_version = req.schema_version.unwrap_or_else(|| "1.0".to_string());
 
         debug!(public_id = %public_id, "inserting event_type");
@@ -110,7 +109,7 @@ impl EventTypeRepository {
         req: crate::features::event_types::models::CreateVersionRequest,
         ctx: RequestContext,
     ) -> Result<Option<EventType>, AppError> {
-        let new_public_id = format!("evt_{}", NanoId::new());
+        let new_public_id = EventType::new_public_id();
         let new_id = Uuid::new_v4();
 
         debug!(source = %source_public_id, new = %new_public_id, "inserting event_type version");

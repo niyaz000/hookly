@@ -3,7 +3,7 @@ use sqlx::{QueryBuilder};
 use tracing::debug;
 use uuid::Uuid;
 
-use crate::common::{types::RequestContext, NanoId};
+use crate::common::types::RequestContext;
 use crate::error::AppError;
 
 use super::models::{
@@ -70,7 +70,7 @@ impl ApiKeyRepository {
         ctx: RequestContext,
     ) -> Result<ApiKey, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("key_{}", NanoId::new());
+        let public_id = ApiKey::new_public_id();
 
         debug!(
             public_id = %public_id,
@@ -368,7 +368,7 @@ impl ApiKeyRepository {
         ctx: RequestContext,
     ) -> Result<ApiKeySettings, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("aks_{}", NanoId::new());
+        let public_id = ApiKeySettings::new_public_id();
 
         debug!(
             organization_id = %organization_id,

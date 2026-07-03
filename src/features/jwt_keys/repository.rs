@@ -38,7 +38,7 @@ impl JwtKeyRepository {
         ctx: RequestContext,
     ) -> Result<JwtKey, AppError> {
         let id = Uuid::now_v7();
-        let public_id = format!("jwk_{}", NanoId::new());
+        let public_id = JwtKey::new_public_id();
         let key_id = format!("kid_{}", NanoId::new());
 
         debug!(public_id = %public_id, tenant_id = %tenant_id, name = %name, "inserting jwt key");
@@ -251,7 +251,7 @@ impl JwtKeyRepository {
 
         // Create the new key, linking to the old one
         let id = Uuid::now_v7();
-        let public_id = format!("jwk_{}", NanoId::new());
+        let public_id = JwtKey::new_public_id();
         let key_id = format!("kid_{}", NanoId::new());
 
         let new_key = sqlx::query_as::<_, JwtKey>(&format!(

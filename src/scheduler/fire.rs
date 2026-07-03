@@ -3,7 +3,10 @@ use sqlx::{types::Json, PgPool};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use hookly::common::nano_id::NanoId;
+use hookly::features::{
+    delivery::models::DeliveryJobRow, events::models::EventRow,
+    schedules::models::ScheduleExecutionRow,
+};
 use hookly::queue;
 
 /// Atomically fires a due schedule:
@@ -102,7 +105,7 @@ async fn fire_inner(
     let mut job_ids: Vec<(Uuid, String)> = Vec::with_capacity(row.endpoint_ids.len());
 
     for (endpoint_id, endpoint_public_id) in row.endpoint_ids.iter().zip(row.endpoint_public_ids.iter()) {
-        let event_public_id = format!("evn_{}", NanoId::new());
+        let event_public_id = EventRow::new_public_id();
         let event_id: Uuid = sqlx::query_scalar(
             r#"INSERT INTO events
                (public_id, application_id, event_type_id, endpoint_id,
@@ -127,7 +130,7 @@ async fn fire_inner(
         .fetch_one(&mut *tx)
         .await?;
 
-        let job_public_id = format!("dj_{}", NanoId::new());
+        let job_public_id = DeliveryJobRow::new_public_id();
         let _: () = sqlx::query(
             r#"INSERT INTO delivery_jobs
                (public_id, event_id, endpoint_id, organization_id, stream_name)
@@ -149,7 +152,7 @@ async fn fire_inner(
 
     // Record schedule execution history.
     let exec_id = Uuid::now_v7();
-    let exec_public_id = format!("sxe_{}", NanoId::new());
+    let exec_public_id = ScheduleExecutionRow::new_public_id();
     sqlx::query(
         r#"INSERT INTO schedule_executions
                (id, public_id, schedule_id, tenant_id, organization_id,
