@@ -10,8 +10,6 @@ CREATE TABLE organizations (
     slug                VARCHAR(64)         NOT NULL,
     status              organization_status NOT NULL DEFAULT 'active',
     billing_email       VARCHAR(64),
-    plan                VARCHAR(32)         NOT NULL DEFAULT 'free',
-    stripe_customer_id  VARCHAR(32),
     external_id         VARCHAR(64),
     tags                JSONB               NOT NULL DEFAULT '{}',
     metadata            JSONB               NOT NULL DEFAULT '{}',

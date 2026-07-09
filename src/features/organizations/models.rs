@@ -26,8 +26,6 @@ pub struct Organization {
     pub slug: String,
     pub status: OrganizationStatus,
     pub owner_email: Option<String>,
-    pub plan: String,
-    pub stripe_customer_id: Option<String>,
     pub external_id: Option<String>,
     pub tags: Json<HashMap<String, String>>,
     pub metadata: Json<HashMap<String, String>>,

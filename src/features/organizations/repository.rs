@@ -15,7 +15,7 @@ use super::models::{
 // Explicit column list for SELECT with LEFT JOINs to get public IDs.
 const SELECT_ORG_COLS: &str = "
     o.id, o.public_id, o.name, o.slug, o.status,
-    o.owner_email, o.plan, o.stripe_customer_id, o.external_id,
+    o.owner_email, o.external_id,
     o.tags, o.metadata, o.settings,
     o.created_by, o.updated_by, o.version,
     o.created_at, o.updated_at, o.deleted_at,
@@ -26,7 +26,7 @@ const SELECT_ORG_COLS: &str = "
 // Columns for INSERT/UPDATE RETURNING (no JOINs possible inside DML).
 const RETURNING_ORG_COLS: &str = "
     id, public_id, name, slug, status,
-    owner_email, plan, stripe_customer_id, external_id,
+    owner_email, external_id,
     tags, metadata, settings,
     created_by, updated_by, version,
     created_at, updated_at, deleted_at
